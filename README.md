@@ -68,14 +68,15 @@ Every technical design choice across this reference architecture is grounded in 
   - Microsoft Learn: [Handle errors in ASP.NET Core web APIs](https://learn.microsoft.com/en-us/aspnet/core/web-api/handle-errors).
   - Martin Fowler: [Notification Pattern](https://martinfowler.com/articles/replaceThrowWithNotification.html).
 
-### 7. Shift-Left Testing & Division of Concerns
-- **Design Choice**: Fast, in-memory unit and contract testing in the API layer, reserving database testing for structural invariants (FKs, uniqueness, nullability, cascading resets).
+### 7. Application Database Encapsulation & Domain Ownership
+- **Design Choice**: Business logic, multi-entity validation, and test automation reside exclusively in the API layer, treating the database as an encapsulated Application Database and reserving database CPU for indexed data access and structural constraints.
 - **Authoritative References**:
-  - Martin Fowler: [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html).
-  - Martin Fowler: [Microservice Testing](https://martinfowler.com/articles/microservice-testing/).
+  - Martin Fowler: [Application Database](https://martinfowler.com/bliki/ApplicationDatabase.html) & [Integration Database](https://martinfowler.com/bliki/IntegrationDatabase.html) — Encapsulating data access behind a single service boundary and eliminating shared database coupling.
+  - Martin Fowler: [Domain Logic and SQL](https://martinfowler.com/articles/dblogic.html) — Engineering trade-offs of domain logic in application code vs. stored procedures.
+  - Martin Fowler: [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) & [Microservice Testing](https://martinfowler.com/articles/microservice-testing/).
   - Martin Fowler: [Smart Endpoints and Dumb Pipes](https://martinfowler.com/articles/microservices.html#SmartEndpointsAndDumbPipes).
   - The Twelve-Factor App: [Stateless Processes & Backing Services](https://12factor.net/).
-  - AWS: [AWS Well-Architected Framework: Reliability & Performance Efficiency](https://aws.amazon.com/architecture/well-architected/).
+  - AWS: [AWS Well-Architected Framework: Performance Efficiency & Reliability](https://aws.amazon.com/architecture/well-architected/).
 
 ---
 
