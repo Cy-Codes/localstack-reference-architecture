@@ -1,6 +1,6 @@
 ---
 name: multi-repo-navigator
-description: "Rules and practices for navigating the multi-repository workspace across CRMDatabaseMS, CRMDatabasePG, and CrmApi while preventing workspace file pollution and enforcing clean git hygiene."
+description: "Rules and practices for navigating the multi-repository workspace across CRMDatabaseMS, CRMDatabasePG, CrmApiCSharp, and CrmApiKotlinSpringBoot while preventing workspace file pollution and enforcing clean git hygiene."
 metadata:
     namespace: workspace
 ---
@@ -13,7 +13,8 @@ This skill ensures streamlined context switching across sub-repositories in the 
 The workspace hosts multiple independent modules:
 - `CRMDatabaseMS`: SQL Server SSDT DACPAC project (`Microsoft.Build.Sql`).
 - `CRMDatabasePG`: PostgreSQL Flyway migrations (`V1..V6`).
-- `CrmApi`: .NET 10 Web API and HotChocolate GraphQL service.
+- `CrmApiCSharp`: .NET 10 / C# 13 Web API and HotChocolate GraphQL service.
+- `CrmApiKotlinSpringBoot`: Kotlin 2.x / Spring Boot Web API and GraphQL service.
 
 ### Execution Context Protocol
 Always execute subproject operations within the respective directory context:
@@ -22,7 +23,8 @@ Always execute subproject operations within the respective directory context:
 cd /Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS && dotnet build
 
 # Good: Run in subshell to avoid changing global working directory
-(cd /Users/cy/codes/localstack-reference-architecture/CrmApi && dotnet test)
+(cd /Users/cy/codes/localstack-reference-architecture/CrmApiCSharp && dotnet test CrmApiCSharp.slnx)
+(cd /Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot && ./gradlew test)
 ```
 
 ---
@@ -42,7 +44,8 @@ Before committing or inspecting changes, ensure the repository boundary is isola
 # Verify submodule git status independently
 git -C /Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS status
 git -C /Users/cy/codes/localstack-reference-architecture/CRMDatabasePG status
-git -C /Users/cy/codes/localstack-reference-architecture/CrmApi status
+git -C /Users/cy/codes/localstack-reference-architecture/CrmApiCSharp status
+git -C /Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot status
 ```
 
 ---

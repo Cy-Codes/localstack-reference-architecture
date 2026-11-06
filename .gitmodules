@@ -4,6 +4,9 @@
 [submodule "CRMDatabasePG"]
 	path = CRMDatabasePG
 	url = git@github.com:Cy-Codes/CRMDatabasePG.git
-[submodule "CrmApi"]
-	path = CrmApi
-	url = https://github.com/Cy-Codes/CrmApi
+[submodule "CrmApiKotlinSpringBoot"]
+	path = CrmApiKotlinSpringBoot
+	url = git@github.com:Cy-Codes/CrmApiKotlinSpringBoot.git
+[submodule "CrmApiCSharp"]
+	path = CrmApiCSharp
+	url = https://github.com/Cy-Codes/CrmApiCSharp

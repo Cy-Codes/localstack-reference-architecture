@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Pre-commit Auto-Formatter & Unused Import/Using Cleaner.
-Uses default language formatters where available (`dotnet format`, `ruff`, `black`, `isort`, `shfmt`)
-and provides deterministic Roslyn `IDE0005` + Python `ast` fallbacks so unused `using` and `import`
+Uses default language formatters where available (`dotnet format`, `ktlint`, `ruff`, `black`, `isort`, `shfmt`)
+and provides deterministic Roslyn `IDE0005` + Kotlin + Python `ast` fallbacks so unused `using` and `import`
 statements are always removed automatically.
 """
 from __future__ import annotations
@@ -22,13 +22,21 @@ CSHARP_IDE0005_PATTERN: re.Pattern[str] = re.compile(
 CSHARP_USING_PATTERN: re.Pattern[str] = re.compile(
     r"^\s*using\s+(?:(?P<static>static)\s+)?(?:(?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*)?(?P<ns>[A-Za-z0-9_.]+)\s*;\s*$"
 )
+KOTLIN_IMPORT_PATTERN: re.Pattern[str] = re.compile(
+    r"^\s*import\s+(?P<fqn>[A-Za-z0-9_.]+(?:\.\*)?)(?:\s+as\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*))?\s*$"
+)
+KOTLIN_IDENTIFIER_PATTERN: re.Pattern[str] = re.compile(
+    r"`[^`]+`|[A-Za-z_][A-Za-z0-9_]*"
+)
 TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {".cs", ".py", ".sql", ".sh", ".md", ".json", ".yml", ".yaml", ".props", ".slnx"}
+    {".cs", ".kt", ".kts", ".py", ".sql", ".sh", ".md", ".json", ".yml", ".yaml", ".props", ".slnx"}
 )
 EXCLUDED_PATH_SEGMENTS: tuple[str, ...] = (
     "/.air/",
     "/bin/",
     "/obj/",
+    "/build/",
+    "/.gradle/",
     "/.git/",
     "/migrations/V",
 )
@@ -170,6 +178,73 @@ def format_python_file(filepath: str) -> bool:
 
 
 # ============================================================================
+# Kotlin Unused Import Cleaner & Sorter (ktlint + Identifier Analysis)
+# ============================================================================
+
+def clean_and_sort_kotlin_imports(content: str) -> str:
+    """Pure transformation removing unused Kotlin imports and sorting remaining imports alphabetically."""
+    lines = content.splitlines()
+    import_indices: list[int] = [
+        idx for idx, line in enumerate(lines) if KOTLIN_IMPORT_PATTERN.match(line)
+    ]
+    if not import_indices:
+        return content
+
+    first_idx = import_indices[0]
+    last_idx = import_indices[-1]
+    body_text = "\n".join(lines[:first_idx] + lines[last_idx + 1:])
+    used_tokens = {
+        tok.strip("`")
+        for tok in KOTLIN_IDENTIFIER_PATTERN.findall(body_text)
+    }
+
+    kept_imports: list[str] = []
+    for idx in range(first_idx, last_idx + 1):
+        raw_line = lines[idx].strip()
+        if not raw_line:
+            continue
+        match = KOTLIN_IMPORT_PATTERN.match(raw_line)
+        if not match:
+            continue
+        fqn = match.group("fqn")
+        alias = match.group("alias")
+        if fqn.endswith(".*"):
+            kept_imports.append(f"import {fqn}")
+            continue
+        symbol = alias or fqn.split(".")[-1]
+        if symbol in used_tokens:
+            rendered = f"import {fqn} as {alias}" if alias else f"import {fqn}"
+            kept_imports.append(rendered)
+
+    sorted_imports = sorted(set(kept_imports))
+    prefix = lines[:first_idx]
+    suffix = lines[last_idx + 1:]
+    new_lines = prefix + sorted_imports + suffix
+    return "\n".join(new_lines) + "\n"
+
+
+def format_kotlin_file(filepath: str) -> bool:
+    """Side-effecting formatter applying ktlint if installed plus deterministic import cleanup/sorting."""
+    if shutil.which("ktlint"):
+        subprocess.run(["ktlint", "--format", "--quiet", filepath], check=False)
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            original = f.read()
+    except OSError:
+        return False
+
+    cleaned = normalize_whitespace(
+        clean_and_sort_kotlin_imports(original) if filepath.endswith(".kt") else original
+    )
+    if cleaned != original:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(cleaned)
+        return True
+    return False
+
+
+# ============================================================================
 # C# Unused Using Cleaner & Sorter (Roslyn IDE0005 + Default Formatting)
 # ============================================================================
 
@@ -263,7 +338,7 @@ def remove_flagged_csharp_usings(diagnostics: tuple[UnusedUsingDiagnostic, ...])
 def format_csharp_workspace(repo_root: str, csharp_files: tuple[str, ...]) -> set[str]:
     """Runs default `dotnet format` when available plus Roslyn IDE0005 unused-using cleanup."""
     modified: set[str] = set()
-    solution_path = os.path.join(repo_root, "CrmApi", "CrmApi.slnx")
+    solution_path = os.path.join(repo_root, "CrmApiCSharp", "CrmApiCSharp.slnx")
     dotnet_bin = shutil.which("dotnet") or "/opt/homebrew/bin/dotnet"
 
     if os.path.exists(solution_path) and os.path.exists(dotnet_bin):
@@ -341,7 +416,7 @@ def format_generic_file(filepath: str) -> bool:
 def discover_all_tracked_files(repo_root: str) -> tuple[str, ...]:
     """Discovers all tracked source files across root and submodules when `--all` is passed."""
     collected: list[str] = []
-    subrepos = ("", "CrmApi", "CRMDatabaseMS", "CRMDatabasePG")
+    subrepos = ("", "CrmApiCSharp", "CrmApiKotlinSpringBoot", "CRMDatabaseMS", "CRMDatabasePG")
     for sub in subrepos:
         sub_dir = os.path.join(repo_root, sub) if sub else repo_root
         if not os.path.isdir(sub_dir):
@@ -373,13 +448,18 @@ def main() -> int:
         )
 
     csharp_files = tuple(f for f in target_files if f.endswith(".cs"))
+    kotlin_files = tuple(f for f in target_files if f.endswith((".kt", ".kts")))
     python_files = tuple(f for f in target_files if f.endswith(".py"))
-    other_files = tuple(f for f in target_files if not f.endswith((".cs", ".py")))
+    other_files = tuple(f for f in target_files if not f.endswith((".cs", ".kt", ".kts", ".py")))
 
     modified_files: set[str] = set()
 
     if csharp_files:
         modified_files.update(format_csharp_workspace(repo_root, csharp_files))
+
+    for kt_file in kotlin_files:
+        if format_kotlin_file(kt_file):
+            modified_files.add(kt_file)
 
     for py_file in python_files:
         if format_python_file(py_file):

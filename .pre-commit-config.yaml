@@ -4,7 +4,7 @@ repos:
   - repo: local
     hooks:
       - id: clean-and-format
-        name: Auto-format files & remove unused C# usings / Python imports
+        name: Auto-format files & remove unused C# usings / Kotlin & Python imports
         entry: python3 .githooks/clean_and_format.py
         language: system
         types: [text]

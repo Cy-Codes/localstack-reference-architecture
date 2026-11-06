@@ -23,11 +23,11 @@ These guidelines define standard behavior, code quality expectations, and domain
 - **Plan Before Execution**: For non-trivial modifications or architectural decisions, present a concise plan outlining affected components before making destructive changes.
 - **Coding Standards Compliance**: All code written or modified must adhere strictly to the project's [Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md):
   - **Functional Logic Over Loops**: Choose declarative transformations/maps over imperative loops (except benchmarked hot paths, streaming I/O, or batch log maintenance).
-  - **Immutable Data by Default**: Use `record` with `init`, `IReadOnlyList`, `ImmutableArray`, `IReadOnlyDictionary`, `FrozenDictionary`, `readonly struct`, or `@dataclass(frozen=True)`.
+  - **Immutable Data by Default**: Use `record` with `init`, `data class` with `val`, `IReadOnlyList`, `ImmutableArray`, `IReadOnlyDictionary`, `FrozenDictionary`, `readonly struct`, or `@dataclass(frozen=True)`.
   - **Explicit Side Effects**: Demarcate mutating commands vs pure queries; isolate side effects to system boundaries.
   - **Zero Magic Numbers**: Use strongly typed constants, enums, or configuration options.
-  - **Helper & Extension Functions**: Consolidate redundant logic into reusable helper functions, preferring static extension methods where supported.
-  - **Submodule Standards**: Comply with language/engine-specific standards in [CrmApi](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/CODING_STANDARDS.md), [CRMDatabaseMS](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md), and [CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md).
+  - **Helper & Extension Functions**: Consolidate redundant logic into reusable helper functions, preferring static/top-level extension methods where supported.
+  - **Submodule Standards**: Comply with language/engine-specific standards in [CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/CODING_STANDARDS.md), [CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md), [CRMDatabaseMS](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md), and [CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md).
 - **Minimal & Focused Diffs**: Keep code changes scoped strictly to the task at hand. Avoid unnecessary reformatting or unrelated refactoring.
 - **Preserve Documentation Integrity**: Preserve existing comments, docstrings, and documentation unless specifically instructed or directly affected by changes.
 - **Safety First**: Never commit or log actual AWS secrets, production credentials, API keys, or certificates.

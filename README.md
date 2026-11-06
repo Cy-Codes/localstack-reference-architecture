@@ -1,6 +1,6 @@
 # Enterprise Multi-CRM Reference Architecture
 
-An enterprise-grade reference architecture modeling and serving the **top 3 CRM data models** across two leading relational database engines with an accompanying high-throughput .NET 10 Web API and GraphQL service:
+An enterprise-grade reference architecture modeling and serving the **top 3 CRM data models** across two leading relational database engines with dual high-throughput Web API and GraphQL implementations (.NET 10 / C# 13 and Kotlin 2.x / Spring Boot):
 
 - **Salesforce** (Sales Cloud & Platform Data Model — 15 Tables)
 - **HubSpot** (CRM Object & Association Model — 11 Tables)
@@ -9,7 +9,8 @@ An enterprise-grade reference architecture modeling and serving the **top 3 CRM 
 Totaling **37 enterprise relational tables** deployed across:
 1. **[CRMDatabaseMS](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/README.md)**: Microsoft SQL Server 2022 utilizing a **declarative, state-based DACPAC lifecycle** (`Microsoft.Build.Sql` SDK).
 2. **[CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/README.md)**: PostgreSQL 16 utilizing an **imperative, migration-based version control lifecycle** (Flyway-compatible `V1..V6` migrations).
-3. **[CrmApi](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/README.md)**: Unified .NET 10 Web API providing high-throughput REST and HotChocolate GraphQL endpoints over Dapper and SqlKata.
+3. **[CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/README.md)**: Unified .NET 10 / C# 13 Web API providing high-throughput REST and HotChocolate GraphQL endpoints over Dapper and SqlKata.
+4. **[CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/README.md)**: Feature-parity Kotlin 2.x + Spring Boot Web API providing identical REST and GraphQL endpoints over a lightweight JDBC Data Mapper and multi-dialect SQL compiler.
 
 Detailed architectural decisions are cataloged in the [Architecture Decision Records (ADR)](file:///Users/cy/codes/localstack-reference-architecture/docs/architecture-decisions.md) and the in-depth [Migration Strategy Comparison](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/MIGRATION_STRATEGY_COMPARISON.md).
 
@@ -17,7 +18,7 @@ Detailed architectural decisions are cataloged in the [Architecture Decision Rec
 
 ## 🏛️ Architectural Highlights & Authoritative Sources
 
-Every technical design choice across this reference architecture is grounded in authoritative industry specifications, established architectural patterns, and foundational literature from Martin Fowler and Microsoft Architecture:
+Every technical design choice across this reference architecture is grounded in authoritative industry specifications, established architectural patterns, and foundational literature from Martin Fowler, Microsoft Architecture, and Spring Architecture:
 
 ### 1. State-Based vs. Migration-Based Database Lifecycles
 - **Design Choice**: Provide direct architectural counterparts for the two major database engineering paradigms (SSDT DACPAC declarative state vs. Flyway imperative versioned migrations) managing identical 37-table schemas.
@@ -28,7 +29,7 @@ Every technical design choice across this reference architecture is grounded in 
   - Redgate Simple Talk: [State-Based vs. Migration-Based Database Development](https://www.red-gate.com/simple-talk/devops/database-devops/state-based-vs-migration-based-database-development/).
 
 ### 2. High-Throughput Micro-ORM & Query Object Patterns
-- **Design Choice**: Use **Dapper** directly over `DbDataReader` streams for minimal allocations and **SqlKata** for compiling unified object queries into engine-specific dialects (`SqlServerCompiler` vs `PostgresCompiler`).
+- **Design Choice**: Use **Dapper** + **SqlKata** in `CrmApiCSharp` and **`JdbcDataMapper`** + **`SqlQuery`** in `CrmApiKotlinSpringBoot` for minimal allocations and multi-dialect SQL compilation (`SqlServerCompiler` vs `PostgresCompiler`).
 - **Authoritative References**:
   - Martin Fowler: [OrmHate](https://martinfowler.com/bliki/OrmHate.html) — Object-relational impedance mismatch and the benefits of lightweight data mapping.
   - Martin Fowler: [Data Mapper Pattern](https://martinfowler.com/eaaCatalog/dataMapper.html) (*Patterns of Enterprise Application Architecture* [P of EAA]) — Decoupling memory objects from relational schemas.
@@ -37,7 +38,7 @@ Every technical design choice across this reference architecture is grounded in 
   - SqlKata: [Documentation & Query Builder](https://sqlkata.com/docs).
 
 ### 3. Dynamic Multi-Provider Routing & Facade Abstraction
-- **Design Choice**: Parameterized URL routing (`/api/{provider:regex(^(ms|pg)$)}/v1/{crm}/{resource}`) enabling runtime database selection, side-by-side benchmarking, and zero-downtime database migration.
+- **Design Choice**: Parameterized URL routing (`/api/{provider}/v1/{crm}/{resource}`) enabling runtime database selection (`ms` or `pg`), side-by-side benchmarking, and zero-downtime database migration.
 - **Authoritative References**:
   - Martin Fowler: [Branch By Abstraction](https://martinfowler.com/bliki/BranchByAbstraction.html) — Running dual implementations in parallel behind a common interface.
   - Martin Fowler: [Strangler Fig Application](https://martinfowler.com/bliki/StranglerFigApplication.html) — Seamless migration through routing facades.
@@ -45,7 +46,7 @@ Every technical design choice across this reference architecture is grounded in 
   - Microsoft: [Microsoft REST API Guidelines](https://github.com/microsoft/api-guidelines).
 
 ### 4. Clean Architecture Layering & Inversion of Control
-- **Design Choice**: Decoupled 4-tier structure (`Domain`, `Infrastructure`, `Application`, `Api`) with inward dependency flow, enabling transport independence (REST and GraphQL reuse the same application services).
+- **Design Choice**: Decoupled 4-tier structure (`Domain`, `Infrastructure`, `Application`, `Api`) with inward dependency flow across both C# and Kotlin implementations, enabling transport independence (REST and GraphQL reuse the same application services).
 - **Authoritative References**:
   - Martin Fowler: [PresentationDomainDataLayering](https://martinfowler.com/bliki/PresentationDomainDataLayering.html) — Separating presentation, domain, and data source concerns.
   - Martin Fowler: [Inversion of Control Containers and the Dependency Injection pattern](https://martinfowler.com/articles/injection.html) — Decoupled service assembly.
@@ -53,8 +54,8 @@ Every technical design choice across this reference architecture is grounded in 
   - Microsoft Learn: [Common Web Application Architectures](https://learn.microsoft.com/en-us/dotnet/architecture/modern-web-apps-azure/common-web-application-architectures).
   - Robert C. Martin: [The Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html).
 
-### 5. Solving the N+1 Problem with GraphQL DataLoaders
-- **Design Choice**: HotChocolate GraphQL integration with `IDataLoader` batching, converting $N$ individual relationship queries into a single parameterized `WHERE id IN (...)` round-trip.
+### 5. GraphQL Multi-CRM Query Execution
+- **Design Choice**: Unified GraphQL schema supporting all three CRM domains across both `ms` and `pg` providers.
 - **Authoritative References**:
   - Martin Fowler: [Lazy Load / N+1 Problem](https://martinfowler.com/eaaCatalog/lazyLoad.html) (*P of EAA*).
   - Lee Byron: [GraphQL DataLoader Pattern](https://github.com/graphql/dataloader).
@@ -62,7 +63,7 @@ Every technical design choice across this reference architecture is grounded in 
   - GraphQL Foundation: [GraphQL Specification](https://spec.graphql.org/).
 
 ### 6. Standardized Error Handling via Problem Details
-- **Design Choice**: Centralized middleware emitting RFC 7807 / RFC 9457 compliant `application/problem+json` envelopes.
+- **Design Choice**: Centralized middleware / controller advice emitting RFC 7807 / RFC 9457 compliant `application/problem+json` envelopes.
 - **Authoritative References**:
   - IETF: [RFC 7807: Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc7807) & [RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457).
   - Microsoft Learn: [Handle errors in ASP.NET Core web APIs](https://learn.microsoft.com/en-us/aspnet/core/web-api/handle-errors).
@@ -86,8 +87,9 @@ Every technical design choice across this reference architecture is grounded in 
 | :--- | :--- | :--- |
 | **[CRMDatabaseMS](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/README.md)** | State-based declarative CRM database | Microsoft SQL Server 2022, SSDT, `Microsoft.Build.Sql`, DACPAC, `sqlcmd` |
 | **[CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/README.md)** | Migration-based imperative CRM database | PostgreSQL 16 Alpine, Flyway SQL Migrations (`V1..V6`), `psql` |
-| **[CrmApi](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/README.md)** | High-performance multi-provider CRM Web API | .NET 10, C# 13, Dapper, SqlKata, HotChocolate GraphQL, Bruno |
-| **[CrmApi Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/bruno/README.md)** | Git-native automated API test collection | Bruno CLI (`bru`), 93 automated endpoint tests per provider |
+| **[CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/README.md)** | High-performance .NET 10 multi-provider CRM Web API | .NET 10, C# 13, Dapper, SqlKata, HotChocolate GraphQL, Bruno |
+| **[CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/README.md)** | High-performance Kotlin + Spring Boot CRM Web API | Kotlin 2.x, Spring Boot, JDBC Data Mapper, Multi-Dialect SQL Compiler, GraphQL, Bruno |
+| **[CrmApiCSharp Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/bruno/README.md)** / **[Kotlin Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/bruno/README.md)** | Git-native automated API test collections | Bruno CLI (`bru`), 93 automated endpoint tests per provider |
 
 ---
 
@@ -96,7 +98,8 @@ Every technical design choice across this reference architecture is grounded in 
 This workspace enforces strict, production-grade coding standards across all services and database engines. Consult the detailed guidelines:
 
 - **[Master Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md)**: Universal principles (functional transformations over loops, immutability by default, explicit side effect demarcation, zero magic numbers, anti-pattern catalog).
-- **[.NET 10 / C# API Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/CODING_STANDARDS.md)**: Records, readonly collections, pure LINQ projections, CQS, async-first, and HotChocolate GraphQL DataLoader patterns.
+- **[.NET 10 / C# API Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/CODING_STANDARDS.md)**: Records, readonly collections, pure LINQ projections, CQS, async-first, and HotChocolate GraphQL DataLoader patterns.
+- **[Kotlin 2.x / Spring Boot API Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md)**: Immutable `data class`es, collection pipelines, top-level extension functions, pure `SqlQuery` compilation, and lightweight JDBC mapping.
 - **[SQL Server / SSDT Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md)**: Declarative DACPAC state, set-based operations over cursors, deterministic functions, audit columns, and transaction safety.
 - **[PostgreSQL / Flyway Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md)**: Migration immutability, set generators (`generate_series`), function volatility (`IMMUTABLE`/`STABLE`/`VOLATILE`), and schema isolation.
 
@@ -104,7 +107,7 @@ This workspace enforces strict, production-grade coding standards across all ser
 
 ## 🚀 One-Command Verification Pipeline
 
-Run the master end-to-end verification pipeline, validating all database migrations, DACPAC builds, SQL Server tests, PostgreSQL tests, xUnit tests, and Bruno API test suites:
+Run the master end-to-end verification pipeline, validating all database migrations, DACPAC builds, SQL Server tests, PostgreSQL tests, C# xUnit tests, Kotlin JUnit 5 tests, and Bruno API test suites:
 
 ```bash
 ./verify_all_pipelines.sh
@@ -113,5 +116,5 @@ Run the master end-to-end verification pipeline, validating all database migrati
 ### What the Pipeline Validates:
 1. **CRMDatabaseMS**: Builds `CRMDatabaseMS.dacpac` with the `Microsoft.Build.Sql` SDK and runs 18 SQL Server verification tests across Suites 1–3 (`03_run_all_tests.sql`).
 2. **CRMDatabasePG**: Applies migrations `V1__init_schemas.sql` through `V6__indexes_and_optimizations.sql` and executes 17 PostgreSQL verification tests across Suites 1–3 (`tests/run_tests.sh`).
-3. **CrmApi Unit & Integration Tests**: Runs 21 xUnit tests covering SqlKata compilation, provider mapping, and WebApplicationFactory integration endpoints.
-4. **Bruno E2E Test Suite**: Spins up `CrmApi` and runs all 93 automated REST and GraphQL requests against both **Microsoft SQL Server** (`Local-MsSql`) and **PostgreSQL** (`Local-Postgres`).
+3. **CrmApiCSharp & CrmApiKotlinSpringBoot Unit & Integration Tests**: Runs xUnit and JUnit 5 test suites covering multi-dialect SQL compilation, provider mapping, and API integration endpoints.
+4. **Bruno E2E Test Suite**: Spins up the CRM API and runs all 93 automated REST and GraphQL requests against both **Microsoft SQL Server** (`Local-MsSql`) and **PostgreSQL** (`Local-Postgres`).

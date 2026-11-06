@@ -43,22 +43,24 @@ cd /Users/cy/codes/localstack-reference-architecture/CRMDatabasePG
 
 ---
 
-## 3. CrmApi Integration & Bruno API Testing
+## 3. CrmApiCSharp & CrmApiKotlinSpringBoot Integration & Bruno API Testing
 
-### Run xUnit Tests
+### Run CrmApiCSharp xUnit Tests
 ```bash
-cd /Users/cy/codes/localstack-reference-architecture/CrmApi
-dotnet test --logger "console;verbosity=normal"
+cd /Users/cy/codes/localstack-reference-architecture/CrmApiCSharp
+dotnet test CrmApiCSharp.slnx --logger "console;verbosity=normal"
+```
+
+### Run CrmApiKotlinSpringBoot JUnit 5 Tests
+```bash
+cd /Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot
+./gradlew test
 ```
 
 ### Run Automated Bruno E2E Test Collection
 Execute all 93 REST & GraphQL requests against both providers:
 ```bash
-cd /Users/cy/codes/localstack-reference-architecture/CrmApi/bruno
-
-# Run against SQL Server provider
+# From CrmApiCSharp/bruno or CrmApiKotlinSpringBoot/bruno
 bru run --env Local-MsSql
-
-# Run against PostgreSQL provider
 bru run --env Local-Postgres
 ```

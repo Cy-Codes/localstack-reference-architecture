@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR) & Design Rationale
 
-This document outlines the foundational technical decisions for the **CrmApi** project, serving relational replica data from **Microsoft SQL Server** (`CRMDatabaseMS`) and **PostgreSQL** (`CRMDatabasePG`) across Salesforce, HubSpot, and Microsoft Dynamics 365.
+This document outlines the foundational technical decisions for the **CrmApiCSharp** (.NET 10 / C# 13) and **CrmApiKotlinSpringBoot** (Kotlin 2.x / Spring Boot) projects, serving relational replica data from **Microsoft SQL Server** (`CRMDatabaseMS`) and **PostgreSQL** (`CRMDatabasePG`) across Salesforce, HubSpot, and Microsoft Dynamics 365.
 
 Every design choice is grounded in enterprise architectural patterns, authoritative industry specifications, and established literature from Martin Fowler, Microsoft Architecture Guides, and database/API consensus.
 
