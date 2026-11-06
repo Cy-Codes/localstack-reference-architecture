@@ -11,7 +11,7 @@ Totaling **37 enterprise relational tables** deployed across:
 2. **[CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/README.md)**: PostgreSQL 16 utilizing an **imperative, migration-based version control lifecycle** (Flyway-compatible `V1..V6` migrations).
 3. **[CrmApi](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/README.md)**: Unified .NET 10 Web API providing high-throughput REST and HotChocolate GraphQL endpoints over Dapper and SqlKata.
 
-Detailed architectural decisions are cataloged in the [Architecture Decision Records (ADR)](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/docs/architecture-decisions.md) and the in-depth [Migration Strategy Comparison](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/MIGRATION_STRATEGY_COMPARISON.md).
+Detailed architectural decisions are cataloged in the [Architecture Decision Records (ADR)](file:///Users/cy/codes/localstack-reference-architecture/docs/architecture-decisions.md) and the in-depth [Migration Strategy Comparison](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/MIGRATION_STRATEGY_COMPARISON.md).
 
 ---
 
@@ -88,6 +88,17 @@ Every technical design choice across this reference architecture is grounded in 
 | **[CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/README.md)** | Migration-based imperative CRM database | PostgreSQL 16 Alpine, Flyway SQL Migrations (`V1..V6`), `psql` |
 | **[CrmApi](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/README.md)** | High-performance multi-provider CRM Web API | .NET 10, C# 13, Dapper, SqlKata, HotChocolate GraphQL, Bruno |
 | **[CrmApi Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/bruno/README.md)** | Git-native automated API test collection | Bruno CLI (`bru`), 93 automated endpoint tests per provider |
+
+---
+
+## 📐 Coding Standards & Architectural Best Practices
+
+This workspace enforces strict, production-grade coding standards across all services and database engines. Consult the detailed guidelines:
+
+- **[Master Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md)**: Universal principles (functional transformations over loops, immutability by default, explicit side effect demarcation, zero magic numbers, anti-pattern catalog).
+- **[.NET 10 / C# API Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApi/CODING_STANDARDS.md)**: Records, readonly collections, pure LINQ projections, CQS, async-first, and HotChocolate GraphQL DataLoader patterns.
+- **[SQL Server / SSDT Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md)**: Declarative DACPAC state, set-based operations over cursors, deterministic functions, audit columns, and transaction safety.
+- **[PostgreSQL / Flyway Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md)**: Migration immutability, set generators (`generate_series`), function volatility (`IMMUTABLE`/`STABLE`/`VOLATILE`), and schema isolation.
 
 ---
 

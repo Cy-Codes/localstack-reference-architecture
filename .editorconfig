@@ -1,0 +1,7 @@
+# Stop EditorConfig search at the repository root and use tool defaults
+root = true
+
+[*.cs]
+# Flag unnecessary using directives so `dotnet format` removes them automatically
+dotnet_diagnostic.IDE0005.severity = warning
+dotnet_sort_system_directives_first = true

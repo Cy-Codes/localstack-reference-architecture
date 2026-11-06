@@ -1,0 +1,11 @@
+# Standard pre-commit framework configuration (https://pre-commit.com)
+# Works alongside `.githooks/pre-commit` (installed via `.githooks/install-hooks.sh`).
+repos:
+  - repo: local
+    hooks:
+      - id: clean-and-format
+        name: Auto-format files & remove unused C# usings / Python imports
+        entry: python3 .githooks/clean_and_format.py
+        language: system
+        types: [text]
+        pass_filenames: true

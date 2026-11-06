@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Git Pre-Commit Hook: Auto-Format & Remove Unused Usings / Imports
+# Runs across both the root workspace and nested submodules (CrmApi,
+# CRMDatabaseMS, CRMDatabasePG). Automatically re-stages formatted files.
+# ============================================================================
+set -euo pipefail
+
+resolve_workspace_root() {
+    local current_top
+    current_top="$(git rev-parse --show-toplevel)"
+    if [ -f "${current_top}/.githooks/clean_and_format.py" ]; then
+        echo "${current_top}"
+    elif [ -f "${current_top}/../.githooks/clean_and_format.py" ]; then
+        (cd "${current_top}/.." && pwd)
+    else
+        echo "${current_top}"
+    fi
+}
+
+readonly WORKSPACE_ROOT="$(resolve_workspace_root)"
+readonly REPO_TOP="$(git rev-parse --show-toplevel)"
+readonly FORMATTER_SCRIPT="${WORKSPACE_ROOT}/.githooks/clean_and_format.py"
+
+if [ ! -f "${FORMATTER_SCRIPT}" ]; then
+    exit 0
+fi
+
+STAGED_FILES=()
+while IFS= read -r rel_path; do
+    if [ -n "${rel_path}" ] && [ -f "${REPO_TOP}/${rel_path}" ]; then
+        STAGED_FILES+=("${REPO_TOP}/${rel_path}")
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+echo "==> [pre-commit] Auto-formatting and removing unused imports/usings on ${#STAGED_FILES[@]} staged file(s)..."
+python3 "${FORMATTER_SCRIPT}" "${STAGED_FILES[@]}"
+
+# Re-stage any files modified by the formatter and validate syntax
+for abs_file in "${STAGED_FILES[@]}"; do
+    if [ -f "${abs_file}" ]; then
+        case "${abs_file}" in
+            *.py)
+                python3 -m py_compile "${abs_file}"
+                ;;
+            *.sh)
+                bash -n "${abs_file}"
+                ;;
+        esac
+        git add "${abs_file}"
+    fi
+done
+
+echo "==> [pre-commit] Formatting and import cleanup complete."

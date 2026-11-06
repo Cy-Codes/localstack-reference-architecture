@@ -1,0 +1,8 @@
+{
+    "toolchains": [],
+    "editor.formatOnSave": true,
+    "editor.guides": [],
+    "prettier.mode": "Auto",
+    "eslint.mode": "Auto",
+    "stylelint.mode": "Auto"
+}
