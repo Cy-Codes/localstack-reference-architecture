@@ -57,7 +57,7 @@ print_banner "STEP 1: CRMDatabaseMS - Build DACPAC & Run SQL Server Test Suite"
 "${DOTNET_BIN}" build "${ROOT_DIR}/CRMDatabaseMS/CRMDatabaseMS/CRMDatabaseMS.sqlproj" -c Release
 "${DOCKER_BIN}" exec "${MS_CONTAINER_NAME}" /opt/mssql-tools18/bin/sqlcmd \
     -S localhost -U sa -P "${MS_SA_PASSWORD}" -C -d "${MS_DB_NAME}" -b \
-    -i /app/tests/03_run_all_tests.sql
+    -i /app/Tests/04_Run_All_Tests.sql
 
 print_banner "STEP 2: CRMDatabasePG - Verify Migrations & Run PostgreSQL Test Suite"
 "${DOCKER_BIN}" exec "${PG_CONTAINER_NAME}" /workspace/migrate.sh

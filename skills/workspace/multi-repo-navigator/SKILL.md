@@ -1,6 +1,6 @@
 ---
 name: multi-repo-navigator
-description: "Rules and practices for navigating the multi-repository workspace across CRMDatabaseMS, CRMDatabasePG, CrmApiCSharp, and CrmApiKotlinSpringBoot while preventing workspace file pollution and enforcing clean git hygiene."
+description: "Rules and practices for navigating the multi-repository workspace across CRMDatabaseMS, CRMDatabasePG, CrmApiCSharp, CrmApiKotlinSpringBoot, and crm-infra while preventing workspace file pollution and enforcing clean git hygiene."
 metadata:
     namespace: workspace
 ---
@@ -15,6 +15,7 @@ The workspace hosts multiple independent modules:
 - `CRMDatabasePG`: PostgreSQL Flyway migrations (`V1..V6`).
 - `CrmApiCSharp`: .NET 10 / C# 13 Web API and HotChocolate GraphQL service.
 - `CrmApiKotlinSpringBoot`: Kotlin 2.x / Spring Boot Web API and GraphQL service.
+- `crm-infra`: Terraform + LocalStack (AWS & Azure) and Docker Compose deployment of every runtime × engine permutation.
 
 ### Execution Context Protocol
 Always execute subproject operations within the respective directory context:
@@ -46,6 +47,7 @@ git -C /Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS status
 git -C /Users/cy/codes/localstack-reference-architecture/CRMDatabasePG status
 git -C /Users/cy/codes/localstack-reference-architecture/CrmApiCSharp status
 git -C /Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot status
+git -C /Users/cy/codes/localstack-reference-architecture/crm-infra status
 ```
 
 ---

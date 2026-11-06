@@ -416,7 +416,7 @@ def format_generic_file(filepath: str) -> bool:
 def discover_all_tracked_files(repo_root: str) -> tuple[str, ...]:
     """Discovers all tracked source files across root and submodules when `--all` is passed."""
     collected: list[str] = []
-    subrepos = ("", "CrmApiCSharp", "CrmApiKotlinSpringBoot", "CRMDatabaseMS", "CRMDatabasePG")
+    subrepos = ("", "CrmApiCSharp", "CrmApiKotlinSpringBoot", "CRMDatabaseMS", "CRMDatabasePG", "crm-infra")
     for sub in subrepos:
         sub_dir = os.path.join(repo_root, sub) if sub else repo_root
         if not os.path.isdir(sub_dir):

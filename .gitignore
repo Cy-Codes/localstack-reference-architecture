@@ -112,7 +112,7 @@ target/
 docker-compose.override.yml
 
 # ==============================================================================
-# Logs, Temp, and Agent Scratch
+# Logs, Temp, Agent Scratch, and Personal Local Notes
 # ==============================================================================
 *.log
 *.tmp
@@ -120,3 +120,4 @@ docker-compose.override.yml
 *.swp
 *~
 scratch/
+/local/

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Installs the pre-commit hook across the root repository and all submodules.
+# Installs the pre-commit hook across the root repository, all submodules, and
+# the nested crm-infra repository.
 # ============================================================================
 set -euo pipefail
 
@@ -24,7 +25,7 @@ echo "==> Installing pre-commit hooks across workspace and submodules..."
 git -C "${ROOT_DIR}" config core.hooksPath .githooks 2>/dev/null || true
 install_hook_target "${ROOT_DIR}/.git/hooks"
 
-for submodule in CrmApiCSharp CrmApiKotlinSpringBoot CRMDatabaseMS CRMDatabasePG; do
+for submodule in CrmApiCSharp CrmApiKotlinSpringBoot CRMDatabaseMS CRMDatabasePG crm-infra; do
     install_hook_target "${ROOT_DIR}/.git/modules/${submodule}/hooks"
     install_hook_target "${ROOT_DIR}/${submodule}/.git/hooks"
 done

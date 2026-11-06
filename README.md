@@ -11,6 +11,7 @@ Totaling **37 enterprise relational tables** deployed across:
 2. **[CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/README.md)**: PostgreSQL 16 utilizing an **imperative, migration-based version control lifecycle** (Flyway-compatible `V1..V6` migrations).
 3. **[CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/README.md)**: Unified .NET 10 / C# 13 Web API providing high-throughput REST and HotChocolate GraphQL endpoints over Dapper and SqlKata.
 4. **[CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/README.md)**: Feature-parity Kotlin 2.x + Spring Boot Web API providing identical REST and GraphQL endpoints over a lightweight JDBC Data Mapper and multi-dialect SQL compiler.
+5. **[crm-infra](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/README.md)**: Terraform + LocalStack platform deploying every **cloud (`local` / `aws` / `azure`) × API runtime × database engine** permutation from the same container images and the same cloud-agnostic contract.
 
 Detailed architectural decisions are cataloged in the [Architecture Decision Records (ADR)](file:///Users/cy/codes/localstack-reference-architecture/docs/architecture-decisions.md) and the in-depth [Migration Strategy Comparison](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/MIGRATION_STRATEGY_COMPARISON.md).
 
@@ -18,7 +19,7 @@ Detailed architectural decisions are cataloged in the [Architecture Decision Rec
 
 ## 🏛️ Architectural Highlights & Authoritative Sources
 
-Every technical design choice across this reference architecture is grounded in authoritative industry specifications, established architectural patterns, and foundational literature from Martin Fowler, Microsoft Architecture, and Spring Architecture:
+Every technical design choice across this reference architecture is grounded in authoritative industry specifications, established architectural patterns, and foundational literature from Martin Fowler, Microsoft Architecture, JetBrains Kotlin, Spring Architecture, HashiCorp Terraform, and LocalStack:
 
 ### 1. State-Based vs. Migration-Based Database Lifecycles
 - **Design Choice**: Provide direct architectural counterparts for the two major database engineering paradigms (SSDT DACPAC declarative state vs. Flyway imperative versioned migrations) managing identical 37-table schemas.
@@ -79,6 +80,21 @@ Every technical design choice across this reference architecture is grounded in 
   - The Twelve-Factor App: [Stateless Processes & Backing Services](https://12factor.net/).
   - AWS: [AWS Well-Architected Framework: Performance Efficiency & Reliability](https://aws.amazon.com/architecture/well-architected/).
 
+### 8. Polyglot Feature-Parity Runtimes & JetBrains `kotlinx.serialization`
+- **Design Choice**: `CrmApiKotlinSpringBoot` mirrors `CrmApiCSharp` route-for-route and field-for-field, using compile-time `kotlinx.serialization` (`encodeDefaults = true`) so both runtimes pass the same Bruno suites.
+- **Authoritative References**:
+  - Martin Fowler: [ContractTest](https://martinfowler.com/bliki/ContractTest.html).
+  - JetBrains: [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html) & [Kotlin Serialization Guide](https://github.com/Kotlin/kotlinx.serialization/blob/master/docs/serialization-guide.md).
+  - Spring Boot Documentation: [Kotlin Support](https://docs.spring.io/spring-boot/reference/features/kotlin.html).
+
+### 9. Cloud-Agnostic Infrastructure as Code & Emulation-First Delivery
+- **Design Choice**: Terraform shared contract modules (`crm-catalog`, `crm-runtime-config`, `container-image`, `database-schema`) with thin AWS (ECS Fargate, RDS) and Azure (Container Apps, Azure SQL, PostgreSQL Flexible Server) modules, verified offline with mocked `terraform test` and live against LocalStack for AWS and LocalStack for Azure.
+- **Authoritative References**:
+  - Martin Fowler: [InfrastructureAsCode](https://martinfowler.com/bliki/InfrastructureAsCode.html) & [ImmutableServer](https://martinfowler.com/bliki/ImmutableServer.html).
+  - HashiCorp: [Module Composition](https://developer.hashicorp.com/terraform/language/modules/develop/composition), [Terraform Tests](https://developer.hashicorp.com/terraform/language/tests), & [Style Guide](https://developer.hashicorp.com/terraform/language/style).
+  - LocalStack: [Terraform Integration](https://docs.localstack.cloud/aws/integrations/infrastructure-as-code/terraform/) & [LocalStack for Azure](https://docs.localstack.cloud/azure/).
+  - The Twelve-Factor App: [Config](https://12factor.net/config), [Build, Release, Run](https://12factor.net/build-release-run), & [Dev/Prod Parity](https://12factor.net/dev-prod-parity).
+
 ---
 
 ## 📁 Repository Overview
@@ -90,6 +106,7 @@ Every technical design choice across this reference architecture is grounded in 
 | **[CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/README.md)** | High-performance .NET 10 multi-provider CRM Web API | .NET 10, C# 13, Dapper, SqlKata, HotChocolate GraphQL, Bruno |
 | **[CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/README.md)** | High-performance Kotlin + Spring Boot CRM Web API | Kotlin 2.x, Spring Boot, JDBC Data Mapper, Multi-Dialect SQL Compiler, GraphQL, Bruno |
 | **[CrmApiCSharp Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/bruno/README.md)** / **[Kotlin Bruno](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/bruno/README.md)** | Git-native automated API test collections | Bruno CLI (`bru`), 93 automated endpoint tests per provider |
+| **[crm-infra](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/README.md)** | Multi-cloud deployment of all 12 permutations | Terraform ≥ 1.9, LocalStack for AWS & Azure, Docker Compose, ECS Fargate, Azure Container Apps, RDS, Azure SQL |
 
 ---
 
@@ -102,6 +119,7 @@ This workspace enforces strict, production-grade coding standards across all ser
 - **[Kotlin 2.x / Spring Boot API Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md)**: Immutable `data class`es, collection pipelines, top-level extension functions, pure `SqlQuery` compilation, and lightweight JDBC mapping.
 - **[SQL Server / SSDT Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md)**: Declarative DACPAC state, set-based operations over cursors, deterministic functions, audit columns, and transaction safety.
 - **[PostgreSQL / Flyway Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md)**: Migration immutability, set generators (`generate_series`), function volatility (`IMMUTABLE`/`STABLE`/`VOLATILE`), and schema isolation.
+- **[Infrastructure / Terraform & LocalStack Standards](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md)**: Shared cloud-agnostic contract modules, `for_each` over `count`, validated variables, conditional LocalStack endpoints, platform secret stores, content-hash images, and strict-mode Bash.
 
 ---
 
@@ -114,7 +132,16 @@ Run the master end-to-end verification pipeline, validating all database migrati
 ```
 
 ### What the Pipeline Validates:
-1. **CRMDatabaseMS**: Builds `CRMDatabaseMS.dacpac` with the `Microsoft.Build.Sql` SDK and runs 18 SQL Server verification tests across Suites 1–3 (`03_run_all_tests.sql`).
+1. **CRMDatabaseMS**: Builds `CRMDatabaseMS.dacpac` with the `Microsoft.Build.Sql` SDK and runs 18 SQL Server verification tests across Suites 1–3 (`Tests/04_Run_All_Tests.sql`).
 2. **CRMDatabasePG**: Applies migrations `V1__init_schemas.sql` through `V6__indexes_and_optimizations.sql` and executes 17 PostgreSQL verification tests across Suites 1–3 (`tests/run_tests.sh`).
 3. **CrmApiCSharp & CrmApiKotlinSpringBoot Unit & Integration Tests**: Runs xUnit and JUnit 5 test suites covering multi-dialect SQL compilation, provider mapping, and API integration endpoints.
 4. **Bruno E2E Test Suite**: Spins up the CRM API and runs all 93 automated REST and GraphQL requests against both **Microsoft SQL Server** (`Local-MsSql`) and **PostgreSQL** (`Local-Postgres`).
+
+Infrastructure is verified separately (see [crm-infra/README.md](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/README.md)):
+
+```bash
+terraform fmt -check -recursive crm-infra/terraform
+terraform -chdir=crm-infra/terraform/aws test     # offline, mocked providers
+terraform -chdir=crm-infra/terraform/azure test   # offline, mocked providers
+./crm-infra/scripts/up.sh local && ./crm-infra/scripts/smoke.sh local --bruno
+```

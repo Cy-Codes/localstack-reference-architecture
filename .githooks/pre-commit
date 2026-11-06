@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Git Pre-Commit Hook: Auto-Format & Remove Unused Usings / Imports
-# Runs across both the root workspace and nested submodules (CrmApiCSharp,
-# CrmApiKotlinSpringBoot, CRMDatabaseMS, CRMDatabasePG). Automatically
-# re-stages formatted files.
+# Runs across both the root workspace and nested repositories (CrmApiCSharp,
+# CrmApiKotlinSpringBoot, CRMDatabaseMS, CRMDatabasePG, crm-infra).
+# Automatically re-stages formatted files.
 # ============================================================================
 set -euo pipefail
 

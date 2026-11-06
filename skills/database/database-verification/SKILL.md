@@ -25,7 +25,7 @@ sqlcmd -S localhost -U sa -P 'YourStrong!Pass' -d master -Q "IF DB_ID('CRMDataba
 sqlpackage /Action:Publish /SourceFile:bin/Debug/CRMDatabaseMS.dacpac /TargetConnectionString:"Server=localhost;Database=CRMDatabaseMS;User Id=sa;Password=YourStrong!Pass;TrustServerCertificate=True;"
 
 # Run verification test suite
-sqlcmd -S localhost -d CRMDatabaseMS -U sa -P 'YourStrong!Pass' -i tests/03_run_all_tests.sql
+sqlcmd -S localhost -d CRMDatabaseMS -U sa -P 'YourStrong!Pass' -i Tests/04_Run_All_Tests.sql
 ```
 
 ---

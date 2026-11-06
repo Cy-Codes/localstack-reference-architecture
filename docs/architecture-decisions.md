@@ -1,8 +1,28 @@
 # Architecture Decision Records (ADR) & Design Rationale
 
-This document outlines the foundational technical decisions for the **CrmApiCSharp** (.NET 10 / C# 13) and **CrmApiKotlinSpringBoot** (Kotlin 2.x / Spring Boot) projects, serving relational replica data from **Microsoft SQL Server** (`CRMDatabaseMS`) and **PostgreSQL** (`CRMDatabasePG`) across Salesforce, HubSpot, and Microsoft Dynamics 365.
+This document outlines the foundational technical decisions for the **CrmApiCSharp** (.NET 10 / C# 13) and **CrmApiKotlinSpringBoot** (Kotlin 2.x / Spring Boot) projects, serving relational replica data from **Microsoft SQL Server** (`CRMDatabaseMS`) and **PostgreSQL** (`CRMDatabasePG`) across Salesforce, HubSpot, and Microsoft Dynamics 365, together with the **`crm-infra/`** Terraform and LocalStack platform that deploys every **cloud × API runtime × database engine** permutation to local Docker, AWS, and Azure.
 
-Every design choice is grounded in enterprise architectural patterns, authoritative industry specifications, and established literature from Martin Fowler, Microsoft Architecture Guides, and database/API consensus.
+Every design choice is grounded in enterprise architectural patterns, authoritative industry specifications, and established literature from Martin Fowler, Microsoft Architecture Guides, JetBrains Kotlin, Spring Architecture, HashiCorp Terraform, LocalStack, and database/API consensus.
+
+The decisions are enforced day-to-day through the workspace coding standards:
+- **[Master Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md)** (universal principles — see [ADR 13](#adr-13-universal-coding-standards-functional-core-immutability-and-command-query-separation))
+- **[CrmApiCSharp Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/CODING_STANDARDS.md)** · **[CrmApiKotlinSpringBoot Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md)** · **[CRMDatabaseMS Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md)** · **[CRMDatabasePG Standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md)** · **[Infrastructure Standards](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md)**
+
+### Implementation Matrix
+
+| ADR | CrmApiCSharp (.NET 10 / C# 13) | CrmApiKotlinSpringBoot (Kotlin 2.x / Spring Boot) | crm-infra/ (Terraform / LocalStack) |
+| :--- | :--- | :--- | :--- |
+| 1. Data Access | Dapper + SqlKata | `JdbcDataMapper` + immutable `SqlQuery` AST | Schema deployed by one-shot migrators |
+| 2. Provider Routing | `{provider:regex(^(ms\|pg)$)}` | `{provider:^(?:ms\|pg)$}` | Both engines wired into every API |
+| 3. Layering | 4 projects (`Domain`, `Infrastructure`, `Application`, `Api`) | 4 packages (`domain`, `infrastructure`, `application`, `api`) | Shared contract modules vs. cloud modules |
+| 4. GraphQL | HotChocolate + `IDataLoader` | Lightweight `POST /graphql` endpoint with selection projection | Same `/graphql` route on every cloud |
+| 5. Factories & Repositories | `IDbConnectionFactory`, `ISqlKataCompilerFactory` | `IDbConnectionFactory`, `ISqlCompilerFactory` | Identical connection strings via `crm-runtime-config` |
+| 6. Problem Details | `ExceptionHandlingMiddleware` | `ExceptionHandlingAdvice` (`@RestControllerAdvice`) | — |
+| 7. Pagination | `record QueryOptions` / `PagedResult<T>` | `data class QueryOptions` / `PagedResult<T>` | — |
+| 8. Application Database | API-owned domain logic | API-owned domain logic | Databases reachable only by API tasks and admin/migrator CIDRs |
+| 9. Polyglot Parity | Reference implementation | Feature-parity implementation | Both runtimes in one catalog |
+| 10–12. Platform | Container image | Container image | Terraform, LocalStack, images & migrators |
+| 13. Coding Standards | C# standards | Kotlin standards | Infrastructure standards |
 
 ---
 
@@ -15,6 +35,11 @@ Every design choice is grounded in enterprise architectural patterns, authoritat
 - [ADR 6: Standardized Error Handling via RFC 7807 / RFC 9457 Problem Details](#adr-6-standardized-error-handling-via-rfc-7807--rfc-9457-problem-details)
 - [ADR 7: Stateless Offset Pagination and Dynamic Filtering via Immutable Value Objects](#adr-7-stateless-offset-pagination-and-dynamic-filtering-via-immutable-value-objects)
 - [ADR 8: Division of Responsibilities: Application Database Encapsulation vs. Relational Invariants](#adr-8-division-of-responsibilities-application-database-encapsulation-vs-relational-invariants)
+- [ADR 9: Polyglot Feature-Parity API Runtimes (C# & Kotlin) with JetBrains `kotlinx.serialization`](#adr-9-polyglot-feature-parity-api-runtimes-c--kotlin-with-jetbrains-kotlinxserialization)
+- [ADR 10: Cloud-Agnostic Infrastructure as Code via Terraform Shared Contract Modules](#adr-10-cloud-agnostic-infrastructure-as-code-via-terraform-shared-contract-modules)
+- [ADR 11: Emulation-First Delivery with LocalStack for AWS & Azure and Offline Terraform Tests](#adr-11-emulation-first-delivery-with-localstack-for-aws--azure-and-offline-terraform-tests)
+- [ADR 12: Immutable Content-Addressed Images, Platform Secret Stores, and One-Shot Schema Migrators](#adr-12-immutable-content-addressed-images-platform-secret-stores-and-one-shot-schema-migrators)
+- [ADR 13: Universal Coding Standards: Functional Core, Immutability, and Command-Query Separation](#adr-13-universal-coding-standards-functional-core-immutability-and-command-query-separation)
 
 ---
 
@@ -34,6 +59,8 @@ We needed a data access strategy that:
 ### Decision
 Use **SqlKata** as an object-oriented query builder and **Dapper** as the execution and object-mapping micro-ORM, eschewing heavyweight full-featured ORMs like Entity Framework Core or NHibernate.
 
+**Kotlin counterpart (`CrmApiKotlinSpringBoot`)**: Apply the identical patterns without JPA/Hibernate. An immutable, sealed query AST (`SqlQuery`, `WhereClause.EqualsClause` / `LikeClause` / `InSubQueryClause`, `OrderByClause`) is compiled by pure dialect compilers (`SqlServerCompiler`, `PostgresCompiler`) into a `CompiledSqlQuery`, and the lightweight `JdbcDataMapper` object binds parameters through JDBC `PreparedStatement` and maps `ResultSet` rows directly into immutable `data class` primary constructors.
+
 ### Rationales & Authoritative Sources
 
 1. **Object-Relational Impedance Mismatch & Micro-ORM Philosophy**:
@@ -52,9 +79,17 @@ Use **SqlKata** as an object-oriented query builder and **Dapper** as the execut
    - Dapper executes directly on native `DbCommand` and `DbDataReader` streams with runtime-emitted dynamic MSIL (`DynamicMethod`), yielding deserialization speeds within single-digit percentage points of handwritten ADO.NET.
    - *References*:
      - Dapper Micro-ORM: [Dapper Benchmarks & Documentation](https://github.com/DapperLib/Dapper#benchmarks).
+     - Oracle: [JDBC Tutorial: Using Prepared Statements](https://docs.oracle.com/javase/tutorial/jdbc/basics/prepared.html) — The JVM foundation used by `JdbcDataMapper` for parameterized, pre-compiled execution.
 
-4. **Decoupling Application from Database Schema Governance**:
-   - Schemas are governed in dedicated database projects (`CRMDatabaseMS` via DACPAC and `CRMDatabasePG` via Flyway). Tying the API to EF Core migrations would create dual-state synchronization debt and violate single-source-of-truth principles.
+4. **Kotlin Immutable Query AST & Deterministic Resource Disposal**:
+   - Kotlin's sealed interfaces and `data class`es model the query tree as an exhaustive, immutable value; compilation is a pure `fold` over clauses, while JDBC `Connection` / `PreparedStatement` / `ResultSet` lifetimes are bounded by `.use { ... }`, and rows are streamed with `generateSequence { if (rs.next()) ... }`.
+   - *References*:
+     - JetBrains: [Kotlin Sealed Classes and Interfaces](https://kotlinlang.org/docs/sealed-classes.html) — Exhaustive `when` over closed type hierarchies (`WhereClause`).
+     - JetBrains: [Kotlin Data Classes](https://kotlinlang.org/docs/data-classes.html) & [Sequences](https://kotlinlang.org/docs/sequences.html).
+     - JetBrains: [`kotlin.use` (AutoCloseable)](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/use.html) — Deterministic disposal of JDBC resources.
+
+5. **Decoupling Application from Database Schema Governance**:
+   - Schemas are governed in dedicated database projects (`CRMDatabaseMS` via DACPAC and `CRMDatabasePG` via Flyway). Tying the API to EF Core migrations (or Hibernate `ddl-auto`) would create dual-state synchronization debt and violate single-source-of-truth principles.
    - *References*:
      - Pramod Sadalage & Martin Fowler: [Evolutionary Database Design](https://martinfowler.com/articles/evodb.html) — Outlines why database migrations must be independently versioned and automated alongside application deployments rather than generated implicitly.
      - Martin Fowler: [Database Migration Pattern](https://martinfowler.com/patterns/database-migration.html).
@@ -64,12 +99,13 @@ Use **SqlKata** as an object-oriented query builder and **Dapper** as the execut
 #### Strategic Architectural Advantages
 - **Hardware Efficiency & Zero Allocation Overhead**: By bypassing EF Core's change-tracker, snapshot buffers, and dynamic proxy generation, Dapper streams rows directly from `DbDataReader` into records, achieving near-zero GC pressure and raw ADO.NET throughput under high concurrent load.
 - **Deterministic Multi-Dialect Query Generation**: SqlKata query trees compile cleanly to engine-specific SQL (T-SQL bracketed schemas with `OFFSET...FETCH` vs PostgreSQL quoted identifiers with `LIMIT...OFFSET`) from a single query definition, eliminating dialect drift and duplicated query logic.
-- **SQL Injection Immunity by Construction**: SqlKata binds query parameters as strictly typed named parameters (`@p0`, `@p1`), preventing injection attacks without relying on manual parameter sanitization.
+- **SQL Injection Immunity by Construction**: SqlKata binds query parameters as strictly typed named parameters (`@p0`, `@p1`), preventing injection attacks without relying on manual parameter sanitization. The Kotlin compilers emit the same `@pN` placeholders, which `JdbcDataMapper.toJdbcSql` rewrites into positional JDBC `?` bindings.
 - **Complete Decoupling from Database Migration Lifecycle**: Eliminates the "dual-state synchronization debt" where EF Core model snapshots drift from actual database DDL. Database schemas remain independently version-controlled and governed via DACPAC (`CRMDatabaseMS`) and Flyway (`CRMDatabasePG`).
 
 #### Architectural Guardrails & Governance
 - **Explicit Graph Mapping over Magic Lazy Loading**: Deep hierarchical object graphs (e.g. Accounts with multiple Contact and Opportunity collections) require explicit mapping queries or DataLoader batching rather than ORM navigation properties. This deliberate trade-off trades implicit, uncontrolled queries for explicit, predictable performance.
 - **Automated Schema Verification in CI**: To guard against column name drift between database schemas and Dapper models, automated integration tests and database schema verification suites execute on every pull request, ensuring model fidelity without requiring heavy ORM metadata scaffolding.
+- **Hand-Rolled Compiler Scope Discipline (Kotlin)**: The Kotlin `SqlQuery` AST intentionally supports only the clauses the API needs (equality, `LIKE`, `IN (subquery)`, ordering, pagination). New clause types must be added as new sealed `WhereClause` variants with matching `SqlCompilerTests` for both dialects, never as raw SQL fragments.
 
 ---
 
@@ -84,7 +120,8 @@ Clients must be able to interrogate either database engine (`ms` for Microsoft S
 ### Decision
 Adopt route templates parameterized by the provider token constrained by regex:
 ```http
-/api/{provider:regex(^(ms|pg)$)}/v1/{crm}/{resource}
+/api/{provider:regex(^(ms|pg)$)}/v1/{crm}/{resource}     # CrmApiCSharp (ASP.NET Core)
+/api/{provider:^(?:ms|pg)$}/v1/{crm}/{resource}         # CrmApiKotlinSpringBoot (Spring Web MVC)
 ```
 
 ### Rationales & Authoritative Sources
@@ -101,6 +138,7 @@ Adopt route templates parameterized by the provider token constrained by regex:
      - Martin Fowler: [Richardson Maturity Model](https://martinfowler.com/articles/richardsonMaturityModel.html) — Steps to the glory of REST: Level 1 (Resources), Level 2 (HTTP Verbs), and uniform resource addressing.
      - Microsoft: [Microsoft REST API Guidelines](https://github.com/microsoft/api-guidelines) — Sections 5.1 (URL Path format), 7.2 (Versioning), and 9 (Collections).
      - Microsoft Learn: [Routing in ASP.NET Core & Route Constraints](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/routing).
+     - Spring Framework Documentation: [Spring Web MVC URI Patterns](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html) — Regex-constrained URI variables (`/api/{provider:^(?:ms|pg)$}/v1/...`) used by the Kotlin controllers.
 
 ### Outcomes
 
@@ -110,8 +148,8 @@ Adopt route templates parameterized by the provider token constrained by regex:
 - **Declarative Route Guardrails**: Utilizing regex constraints (`{provider:regex(^(ms|pg)$)}`) ensures invalid database provider tokens are rejected at the routing gateway with standard HTTP 404 responses before executing any application or database code.
 
 #### Architectural Guardrails & Governance
-- **Encapsulated Provider Context Propagation**: Every controller endpoint and query service accepts and propagates the `DatabaseProvider` discriminator to resolve the correct connection factory and compiler. This routing logic is strictly encapsulated via `BaseCrmController` and `IDbConnectionFactory`, preventing provider-specific leaks into domain contracts.
-- **Strict Schema Parity Enforcement**: Both SQL Server and PostgreSQL database instances must strictly conform to identical entity definitions and column types, enforced via automated database schema assertion test suites (`tests/01_schema_structure_tests.sql`).
+- **Encapsulated Provider Context Propagation**: Every controller endpoint and query service accepts and propagates the `DatabaseProvider` discriminator to resolve the correct connection factory and compiler. This routing logic is strictly encapsulated via `BaseCrmController` and `IDbConnectionFactory` in both runtimes (`provider.ToDatabaseProvider()` / `provider.toDatabaseProvider()`), preventing provider-specific leaks into domain contracts.
+- **Strict Schema Parity Enforcement**: Both SQL Server and PostgreSQL database instances must strictly conform to identical entity definitions and column types, enforced via automated database schema assertion test suites (`CRMDatabaseMS/Tests/01_Schema_Structure_Tests.sql`, `CRMDatabasePG/tests/01_schema_structure_tests.sql`).
 
 ---
 
@@ -130,6 +168,8 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
 - **`Application`**: Query services (`ISalesforceQueryService`, `IHubSpotQueryService`, `IDynamics365QueryService`), filter orchestrators, and child collection loaders.
 - **`Api`**: ASP.NET Core controllers, route dispatching, middleware, OpenAPI / Swagger specifications, and HotChocolate GraphQL endpoints.
 
+**Kotlin counterpart**: The same four layers are expressed as packages under `codes.cy.crmapi` (`domain`, `infrastructure`, `application`, `api`) in a single Gradle module, wired exclusively through Spring primary-constructor injection of `private val` interface dependencies (`ISalesforceQueryService`, `ISalesforceRepository`, `IDbConnectionFactory`, `ISqlCompilerFactory`).
+
 ### Rationales & Authoritative Sources
 
 1. **Separation of Concerns & Presentation-Domain-Data Layering**:
@@ -145,6 +185,8 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
    - *References*:
      - Martin Fowler: [Inversion of Control Containers and the Dependency Injection pattern](https://martinfowler.com/articles/injection.html) — Principles of decoupling service configuration from resolution.
      - Microsoft Learn: [Dependency injection in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection).
+     - Spring Framework Documentation: [Dependency Injection (Constructor-based)](https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html) — Constructor injection with immutable `private val` collaborators in the Kotlin runtime.
+     - Spring Framework Documentation: [Kotlin Support](https://docs.spring.io/spring-framework/reference/languages/kotlin.html) — Final-by-default classes opened by `kotlin("plugin.spring")`, null-safety via `-Xjsr305=strict`.
 
 ### Outcomes
 
@@ -154,7 +196,8 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
 - **Long-Term Maintainability & Domain Protection**: Domain records and contracts have zero third-party dependencies (no ASP.NET Core, no Dapper, no database drivers), protecting the core CRM model from external framework churn or breaking library upgrades.
 
 #### Architectural Guardrails & Governance
-- **Strict Layer Boundary Enforcement**: Developers must resist leaking infrastructure concerns (e.g. `SqlConnection`, raw SQL strings) or transport concerns (e.g. `HttpContext`, HTTP status codes) into the `Domain` or `Application` layers. This is enforced via compile-time project reference boundaries.
+- **Strict Layer Boundary Enforcement**: Developers must resist leaking infrastructure concerns (e.g. `SqlConnection`, raw SQL strings) or transport concerns (e.g. `HttpContext`, HTTP status codes) into the `Domain` or `Application` layers. In C# this is enforced via compile-time project reference boundaries.
+- **Package-Level Boundaries in Kotlin**: Because the Kotlin layers share one Gradle module, boundaries are enforced by code review and the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) rather than the compiler. The `domain` package may depend only on the Kotlin standard library and `kotlinx.serialization` annotations; splitting into Gradle subprojects (or adding architecture tests) is the escalation path if violations appear.
 - **Separated Interface Governance**: Every repository and query service is governed by an explicit interface (`ISalesforceQueryService`, `ISalesforceRepository`), ensuring that implementations remain interchangeable and fully mockable during testing.
 
 ---
@@ -170,6 +213,8 @@ In addition to REST endpoints, clients require a flexible query interface capabl
 ### Decision
 Implement **HotChocolate GraphQL** utilizing the `IDataLoader` pattern for batching child entity queries over Dapper and SqlKata.
 
+**Kotlin counterpart**: Expose a lightweight `POST /graphql` endpoint (`GraphqlController`) that resolves a fixed catalog of root operations (`salesforceAccounts`, `salesforceAccountById`, `hubSpotCompanies`, `dynamics365Contacts`, ...) through the `Query` resolver and projects only the requested selection-set fields into a `kotlinx.serialization` `JsonObject`. The Kotlin schema deliberately exposes **flat root fields only** (no nested child navigation), so no N+1 fan-out can occur; nested navigation is reached through the REST child routes (e.g. `/accounts/{id}/contacts`).
+
 ### Rationales & Authoritative Sources
 
 1. **Mitigating the N+1 Query Problem in Relational Queries**:
@@ -184,6 +229,13 @@ Implement **HotChocolate GraphQL** utilizing the `IDataLoader` pattern for batch
    - Supports declarative field selection, strongly typed schemas, and standard execution semantics.
    - *References*:
      - GraphQL Foundation: [Official GraphQL Specification](https://spec.graphql.org/).
+     - Martin Fowler: [Data Transfer Object (DTO)](https://martinfowler.com/eaaCatalog/dataTransferObject.html) — Client-driven field projection in the Kotlin `GraphqlController`.
+
+3. **Escalation Path for Nested GraphQL on the JVM**:
+   - Should the Kotlin schema grow nested child fields, it must adopt a specification-compliant engine with batching rather than extending regex parsing.
+   - *References*:
+     - Spring for GraphQL: [Annotated Controllers & `@BatchMapping`](https://docs.spring.io/spring-graphql/reference/controllers.html) — DataLoader-backed batch resolution on Spring.
+     - GraphQL Java: [java-dataloader](https://github.com/graphql-java/java-dataloader) — JVM port of the DataLoader batching pattern.
 
 ### Outcomes
 
@@ -195,6 +247,7 @@ Implement **HotChocolate GraphQL** utilizing the `IDataLoader` pattern for batch
 #### Architectural Guardrails & Governance
 - **Schema Type Governance**: Code-first GraphQL schema definitions (`SalesforceAccountType`, `SalesforceContactType`) must be explicitly declared and maintained to expose child navigation fields and link DataLoaders cleanly.
 - **Query Complexity Protection**: While field selection is client-driven, production deployments must enforce HotChocolate query depth and complexity limits (`AddMaxExecutionDepth`, `AddMaxAllowedPagingBounds`) to guard the database against maliciously nested or recursive GraphQL requests.
+- **Kotlin Operation Catalog Governance**: The Kotlin endpoint only recognizes operations listed in `GraphqlController.OPERATION_REGEX` and rejects everything else with a GraphQL `errors` payload (HTTP 400). Adding an operation requires updating the resolver, the regex catalog, `GraphQLEndpointTests`, and the Bruno `04-GraphQL` collection together, keeping parity with the C# schema.
 
 ---
 
@@ -208,6 +261,8 @@ The application must instantiate either `Microsoft.Data.SqlClient.SqlConnection`
 
 ### Decision
 Implement the **Abstract Factory Pattern** (`IDbConnectionFactory`, `ISqlKataCompilerFactory`) injected into a **Repository Pattern** (`BaseRepository`, `SalesforceRepository`, `HubSpotRepository`, `Dynamics365Repository`).
+
+**Kotlin counterpart**: `DbConnectionFactory` (implementing `IDbConnectionFactory`) parses the **same ADO.NET-style connection strings** consumed by the C# API (`ConnectionStrings.CRMDatabaseMS` / `ConnectionStrings.CRMDatabasePG`, bound from `CONNECTIONSTRINGS_CRMDATABASE{MS,PG}` via Spring relaxed binding) into JDBC URLs, and `SqlCompilerFactory` (implementing `ISqlCompilerFactory`) returns singleton `SqlServerCompiler` / `PostgresCompiler` instances. Repositories (`BaseRepository`, `SalesforceRepository`, ...) mirror the C# hierarchy one-for-one.
 
 ### Rationales & Authoritative Sources
 
@@ -225,8 +280,15 @@ Implement the **Abstract Factory Pattern** (`IDbConnectionFactory`, `ISqlKataCom
 
 3. **SQL Injection Defense-in-Depth**:
    - Dynamic sorting columns and filter keys are validated against strict alphanumeric regex (`^[a-zA-Z0-9_.]+$`), while all query values are passed as parameterized bindings (`@p0`, `@p1`) to Dapper.
+   - Kotlin applies the identical whitelist via `String.isSafeSqlIdentifier()` (`SAFE_IDENTIFIER_REGEX`) in `QueryFilteringExtensions.kt`.
    - *References*:
      - OWASP Foundation: [SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html).
+
+4. **Single Connection-String Contract Across Runtimes**:
+   - Both runtimes accept the identical connection string per engine so that infrastructure (ADR 10) never branches on the API language.
+   - *References*:
+     - Spring Boot Documentation: [Externalized Configuration & Relaxed Binding](https://docs.spring.io/spring-boot/reference/features/external-config.html).
+     - The Twelve-Factor App: [III. Config](https://12factor.net/config) — Store configuration in the environment.
 
 ### Outcomes
 
@@ -237,6 +299,7 @@ Implement the **Abstract Factory Pattern** (`IDbConnectionFactory`, `ISqlKataCom
 
 #### Architectural Guardrails & Governance
 - **Connection Pooling & Transient Fault Governance**: Direct ADO.NET connection creation relies on connection pooling configured within connection strings. Production environments must configure transient connection retry policies (e.g. `EnableRetryOnFailure` or Polly execution policies) within the factory implementation.
+- **JVM Connection Pooling (Kotlin)**: The Kotlin `DbConnectionFactory` currently opens connections through `java.sql.DriverManager`, which does not pool. Before production load, the factory must be backed by a pooled `DataSource` (e.g. [HikariCP](https://github.com/brettwooldridge/HikariCP)) behind the same `IDbConnectionFactory` interface, leaving repositories untouched.
 - **Repository Granularity**: Generic query execution is centralized in `BaseRepository`, while domain-specific entity queries reside in dedicated CRM repositories (`SalesforceRepository`, etc.), preventing god-object anti-patterns.
 
 ---
@@ -252,6 +315,8 @@ When exceptions occur (e.g. invalid database provider, bad filter parameter, mis
 ### Decision
 Implement custom ASP.NET Core middleware (`ExceptionHandlingMiddleware`) returning standard **`ProblemDetails`** payloads with `Content-Type: application/problem+json` compliant with RFC 7807 and RFC 9457.
 
+**Kotlin counterpart**: A global `@RestControllerAdvice` (`ExceptionHandlingAdvice`) whose pure companion function `createProblemDetails` maps exceptions to a `@Serializable` `ProblemDetailsPayload` (`IllegalArgumentException` / type-mismatch / unreadable body → 400, `NoSuchElementException` / `NoResourceFoundException` / `NoHandlerFoundException` → 404, otherwise 500), served as `application/problem+json`. `500` details are masked with `GENERIC_INTERNAL_ERROR_DETAIL` unless a `dev` / `development` profile is active.
+
 ### Rationales & Authoritative Sources
 
 1. **RFC 7807 / RFC 9457 Standardized Problem Details**:
@@ -260,6 +325,7 @@ Implement custom ASP.NET Core middleware (`ExceptionHandlingMiddleware`) returni
      - IETF RFC 7807: [Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc7807).
      - IETF RFC 9457: [Problem Details for HTTP APIs (Updated RFC)](https://datatracker.ietf.org/doc/html/rfc9457).
      - Microsoft Learn: [Handle errors in ASP.NET Core web APIs](https://learn.microsoft.com/en-us/aspnet/core/web-api/handle-errors).
+     - Spring Framework Documentation: [Error Responses (RFC 9457) in Spring Web MVC](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html) & [Controller Advice](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-advice.html).
 
 2. **Notification Pattern & Safe Fault Handling**:
    - Translates domain exceptions (`ArgumentException` $\rightarrow$ 400 Bad Request, `KeyNotFoundException` $\rightarrow$ 404 Not Found, unhandled $\rightarrow$ 500 Internal Server Error) while logging complete diagnostic context securely to `ILogger`.
@@ -290,6 +356,8 @@ Querying 37 enterprise CRM entities requires uniform, stateless handling of pagi
 ### Decision
 Model query parameters as an immutable `QueryOptions` record and return responses wrapped in an immutable `PagedResult<T>` envelope containing metadata (`Items`, `TotalCount`, `Page`, `PageSize`, `TotalPages`, `HasPreviousPage`, `HasNextPage`).
 
+**Kotlin counterpart**: `QueryOptions` and `PagedResult<T>` are `data class`es with `val` properties only (`PagedResult<T>` is `@Serializable` for compile-time JSON encoding); limits are `const val` companion constants (`DEFAULT_PAGE = 1`, `DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE = 100`) and normalization is exposed as pure computed properties (`normalizedPage`, `normalizedPageSize`). Query parameters are parsed at the boundary by the `Map<String, String>.toQueryOptions(...)` extension function.
+
 ### Rationales & Authoritative Sources
 
 1. **Value Object Pattern**:
@@ -297,6 +365,7 @@ Model query parameters as an immutable `QueryOptions` record and return response
    - *References*:
      - Martin Fowler: [Value Object](https://martinfowler.com/bliki/ValueObject.html) — Immutable objects compared by value rather than identity.
      - Martin Fowler: [Data Transfer Object (DTO)](https://martinfowler.com/eaaCatalog/dataTransferObject.html) (*P of EAA*) — Packaging data between processes to reduce round-trips.
+     - JetBrains: [Kotlin Data Classes](https://kotlinlang.org/docs/data-classes.html) & [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html) — `val`-only value types and read-only collection interfaces.
 
 2. **Microsoft REST API Guidelines on Collections & Pagination**:
    - Adheres to standard pagination patterns using `page` and `pageSize` (defaulting to 20, capped at 100), accompanied by total item counts and page calculation.
@@ -311,7 +380,7 @@ Model query parameters as an immutable `QueryOptions` record and return response
 - **Stateless Horizontal Scalability**: Zero server-side session state or cursors are maintained in memory; each query request is completely self-contained, allowing API containers to scale horizontally behind round-robin load balancers without sticky sessions.
 
 #### Architectural Guardrails & Governance
-- **Bounded Page Sizes to Guard Against Database Exhaustion**: The `BaseRepository` hard-caps `pageSize` to a maximum of 100 records (defaulting to 20), preventing malicious or poorly designed client queries from attempting to load millions of records into memory at once.
+- **Bounded Page Sizes to Guard Against Database Exhaustion**: The `BaseRepository` hard-caps `pageSize` to a maximum of 100 records (defaulting to 20), preventing malicious or poorly designed client queries from attempting to load millions of records into memory at once. Both runtimes must keep these limits identical (`QueryOptions.MaxPageSize` / `QueryOptions.MAX_PAGE_SIZE`).
 - **Deep-Offset Query Latency**: While offset pagination (`OFFSET...FETCH` / `LIMIT...OFFSET`) is optimal and expected for standard CRM interactive navigation (pages 1 through 100), extremely deep offsets (e.g. page 10,000+) incur database scan costs. For massive bulk export scenarios, dedicated bulk ETL procedures or keyset pagination patterns should be introduced as a complementary pattern.
 
 ---
@@ -360,7 +429,7 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
      - The Twelve-Factor App: [Stateless Processes & Backing Services](https://12factor.net/) — Stateless application processes scale horizontally at low cost, treating databases as attached resources.
 
 4. **The Test Pyramid & Fast Developer Feedback (Martin Fowler)**:
-   - Fast, reliable CI/CD pipelines depend on running thousands of in-memory domain tests in seconds (`dotnet test`). Moving business logic into the database makes in-memory testing impossible and creates flaky, slow CI builds.
+   - Fast, reliable CI/CD pipelines depend on running thousands of in-memory domain tests in seconds (`dotnet test`, `./gradlew test`). Moving business logic into the database makes in-memory testing impossible and creates flaky, slow CI builds.
    - *References*:
      - Martin Fowler: [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html).
      - Martin Fowler: [Microservice Testing](https://martinfowler.com/articles/microservice-testing/).
@@ -373,7 +442,7 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
 ### Outcomes
 
 #### Strategic Architectural Advantages
-- **Single Source of Truth**: 100% of domain rules, calculations, and validations reside in version-controlled C# domain services with full IDE and compiler assistance, eliminating the dual-maintenance trap.
+- **Single Source of Truth**: 100% of domain rules, calculations, and validations reside in version-controlled application services (C# in `CrmApiCSharp`, Kotlin in `CrmApiKotlinSpringBoot`) with full IDE and compiler assistance, eliminating the dual-maintenance trap between application code and procedural SQL.
 - **True Engine Portability**: The same business logic operates concurrently against both Microsoft SQL Server and PostgreSQL without maintaining twin procedural codebases in T-SQL and PL/pgSQL.
 - **Sub-Second CI/CD Execution**: Automated test suites validate the domain model in seconds during pull requests without provisioning database instances.
 - **Compute Optimization**: Database CPU/IOPS are preserved exclusively for indexing, query plan execution, and ACID transactions—delivering maximum relational throughput.
@@ -382,3 +451,267 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
 #### Architectural Guardrails & Governance
 - **Strict Encapsulation (No Direct DB Write Access)**: Direct write access to relational storage from reporting tools, third-party consumers, or ad-hoc scripts is explicitly denied. All mutations must route through API domain services.
 - **Structural Invariants at the Storage Tier**: The database layer is not passive; it rigorously enforces declarative relational invariants (primary keys, foreign keys, unique constraints, NOT NULL constraints, check constraints, and ACID transactions), guaranteeing that no invalid or orphaned data can ever be persisted under any operational circumstance.
+- **Network-Level Encapsulation in Deployed Environments**: In `crm-infra/`, database security groups and firewall rules admit only the API tasks plus explicitly configured admin/migrator ranges (`database_admin_cidrs` on AWS, `database_firewall_rules` on Azure). These ranges default to open for emulator convenience and must be narrowed to known IPs before any real-cloud deployment (see ADR 12).
+
+---
+
+## ADR 9: Polyglot Feature-Parity API Runtimes (C# & Kotlin) with JetBrains `kotlinx.serialization`
+
+### Status
+Accepted
+
+### Context
+The reference architecture must demonstrate that its patterns (ADR 1–8) are language-agnostic and must let teams compare the .NET and JVM ecosystems under identical workloads. A second runtime is only valuable if it is a **true drop-in replacement**: same routes, same query protocol, same JSON field names, same error envelopes, and the same configuration contract. Kotlin introduces two specific serialization risks: JavaBean-style reflection serializers rename `is*` boolean properties (`isDeleted` → `deleted`), and omitting default-valued properties would make Kotlin payloads diverge field-for-field from the C# API.
+
+### Decision
+Maintain **`CrmApiKotlinSpringBoot`** (Kotlin 2.x, Spring Boot, JDK 25 toolchain) as a feature-parity counterpart of **`CrmApiCSharp`**:
+- **Identical public contract**: all 37 entities, the `/api/{provider}/v1/{crm}/{resource}` routes, `POST /graphql`, `/health`, pagination/filter parameters, and RFC 9457 error envelopes.
+- **Compile-time JSON via JetBrains `kotlinx.serialization`**: domain models are `@Serializable` `data class`es, served through Spring's `KotlinSerializationJsonHttpMessageConverter` configured with `Json { encodeDefaults = true; ignoreUnknownKeys = true; explicitNulls = true }`, preserving `is*` property names without reflection.
+- **Shared verification**: both runtimes run the same Bruno collection layout (93 requests × `Local-MsSql` / `Local-Postgres`) and are wired into the same `crm-infra/` workload catalog (`csharp`, `kotlin`), so every permutation is tested identically.
+
+### Rationales & Authoritative Sources
+
+1. **Contract Parity over Implementation Parity**:
+   - Consumers depend on the HTTP contract, not the language. Running the same contract tests against both implementations proves interchangeability and allows Branch-By-Abstraction swaps at the runtime level, exactly as ADR 2 does at the database level.
+   - *References*:
+     - Martin Fowler: [ContractTest](https://martinfowler.com/bliki/ContractTest.html) — Verifying that a service honors the contract its consumers rely on.
+     - Martin Fowler: [Branch By Abstraction](https://martinfowler.com/bliki/BranchByAbstraction.html).
+
+2. **Idiomatic, Immutable Kotlin on Spring**:
+   - Kotlin's final-by-default classes, `val` properties, null-safety, extension functions, and `data class`es map directly onto the workspace immutability and helper-function standards (ADR 13).
+   - *References*:
+     - JetBrains: [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html), [Null Safety](https://kotlinlang.org/docs/null-safety.html), and [Extensions](https://kotlinlang.org/docs/extensions.html).
+     - Spring Boot Documentation: [Kotlin Support](https://docs.spring.io/spring-boot/reference/features/kotlin.html).
+     - Spring Framework Documentation: [Kotlin](https://docs.spring.io/spring-framework/reference/languages/kotlin.html).
+
+3. **Compile-Time Serialization over Reflection**:
+   - `kotlinx.serialization` generates serializers at compile time through the `org.jetbrains.kotlin.plugin.serialization` compiler plugin, avoiding reflection cost and JavaBean property-name mangling.
+   - *References*:
+     - JetBrains: [Kotlin Serialization](https://kotlinlang.org/docs/serialization.html) & [Kotlin Serialization Guide](https://github.com/Kotlin/kotlinx.serialization/blob/master/docs/serialization-guide.md).
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Language-Agnostic Proof of the Architecture**: Every ADR is demonstrated twice, in two ecosystems, against two database engines — a 2 × 2 matrix exercised by the same test suites.
+- **Byte-Compatible JSON Contracts**: `encodeDefaults = true` and native `is*` naming keep Kotlin responses field-for-field identical to the C# API, so Bruno assertions are shared without runtime-specific branches.
+- **Runtime Portability in Infrastructure**: Because both images honor the same port (`8080`), health path (`/health`), and connection-string contract, `crm-infra/` deploys either runtime by catalog key alone (ADR 10).
+
+#### Architectural Guardrails & Governance
+- **Parity Changes Ship Together**: Any new entity, route, filter, or error mapping must land in both runtimes and in both Bruno collections in the same change set; divergence is treated as a defect.
+- **Serializer Configuration Is Frozen**: Disabling `encodeDefaults`, switching to Jackson, or adding JavaBean-style DTOs is prohibited by the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md).
+
+---
+
+## ADR 10: Cloud-Agnostic Infrastructure as Code via Terraform Shared Contract Modules
+
+### Status
+Accepted
+
+### Context
+The same workloads (2 API runtimes × 2 database engines) must deploy to local Docker, AWS, and Azure — and must be migratable between clouds without rewriting application configuration. Hand-built or per-cloud bespoke environments drift quickly ("snowflake servers"), and duplicating *what* is deployed across cloud-specific code guarantees divergence.
+
+### Decision
+Use **Terraform** with a strict split between **shared, cloud-agnostic contract modules** and **thin provider-specific modules**:
+- `modules/shared/crm-catalog` — pure single source of truth for runtimes, engines, ports, health paths, and migrator platforms.
+- `modules/shared/crm-runtime-config` — pure translation of database endpoints into each runtime's environment/secret contract (identical connection strings, different variable spelling).
+- `modules/shared/container-image`, `modules/shared/database-schema`, `modules/shared/endpoint-address` — provider-neutral build, migration, and parsing helpers.
+- `modules/aws/*` (VPC, RDS, ECS Fargate + ALB) and `modules/azure/*` (Container Apps, Azure SQL, PostgreSQL Flexible Server) — the only cloud-specific code.
+- Root stacks `terraform/aws` and `terraform/azure` compose these modules; each permutation (`all`, `csharp-ms`, `csharp-pg`, `kotlin-ms`, `kotlin-pg`) runs in its own **Terraform workspace** with its own `permutations/*.tfvars`.
+
+### Rationales & Authoritative Sources
+
+1. **Infrastructure as Code & Elimination of Snowflakes**:
+   - Declarative, version-controlled definitions make every environment reproducible and reviewable.
+   - *References*:
+     - Martin Fowler: [InfrastructureAsCode](https://martinfowler.com/bliki/InfrastructureAsCode.html) & [SnowflakeServer](https://martinfowler.com/bliki/SnowflakeServer.html).
+     - Kief Morris: *Infrastructure as Code: Designing and Delivering Dynamic Systems for the Cloud Age* (O'Reilly, 3rd ed.) — [infrastructure-as-code.com](https://infrastructure-as-code.com/).
+
+2. **Module Composition & Standard Module Structure**:
+   - Small modules composed by thin root stacks keep provider details at the edges and the shared contract at the core.
+   - *References*:
+     - HashiCorp: [Module Composition](https://developer.hashicorp.com/terraform/language/modules/develop/composition) & [Standard Module Structure](https://developer.hashicorp.com/terraform/language/modules/develop/structure).
+     - HashiCorp: [Terraform Style Guide](https://developer.hashicorp.com/terraform/language/style).
+     - AWS Prescriptive Guidance: [Best Practices for Using the Terraform AWS Provider](https://docs.aws.amazon.com/prescriptive-guidance/latest/terraform-aws-provider-best-practices/introduction.html).
+
+3. **Configuration in the Environment & Dev/Prod Parity**:
+   - A single environment contract per runtime, identical on every cloud, keeps images unchanged across environments.
+   - *References*:
+     - The Twelve-Factor App: [III. Config](https://12factor.net/config) & [X. Dev/Prod Parity](https://12factor.net/dev-prod-parity).
+
+4. **Isolated, Side-by-Side Permutations**:
+   - *References*:
+     - HashiCorp: [Terraform Workspaces](https://developer.hashicorp.com/terraform/language/state/workspaces) — Multiple state instances of one configuration.
+     - HashiCorp: [`for_each` Meta-Argument](https://developer.hashicorp.com/terraform/language/meta-arguments/for_each) & [`for` Expressions](https://developer.hashicorp.com/terraform/language/expressions/for) — Stable, key-addressed collections of runtimes and engines.
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Cloud Migration by Re-Targeting**: Moving `kotlin-pg` from AWS to Azure is `./crm-infra/scripts/up.sh azure kotlin-pg` — no application or catalog change.
+- **One Place to Add a Workload**: A new runtime or engine is a catalog entry plus its image; both clouds pick it up automatically.
+- **Well-Architected Alignment on Both Clouds**: Managed compute (ECS Fargate / Container Apps) and managed databases (RDS / Azure SQL / PostgreSQL Flexible Server) map to the [AWS Well-Architected Framework](https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html) and [Azure Well-Architected Framework](https://learn.microsoft.com/en-us/azure/well-architected/) pillars.
+
+#### Architectural Guardrails & Governance
+- **No Cloud Logic in Shared Modules**: `modules/shared` must never contain `aws_*` or `azurerm_*` resources; enforced by review against the [Infrastructure Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md).
+- **Validated Selectors**: `api_runtimes` and `database_engines` are validated sets; unknown values fail at `plan` time.
+
+---
+
+## ADR 11: Emulation-First Delivery with LocalStack for AWS & Azure and Offline Terraform Tests
+
+### Status
+Accepted
+
+### Context
+Validating cloud deployments against real AWS and Azure accounts is slow, costly, and requires credentials that should never live on developer machines or in CI by default. The team needs fast feedback that the *same* Terraform and the *same* images work on both clouds, plus a cheaper layer of tests that needs no emulator at all.
+
+### Decision
+Adopt an **emulation-first** workflow with a layered test strategy:
+1. **Offline contract tests** — `terraform test` with `mock_provider` blocks and `override_module` for the host-side migrator verifies wiring, naming, permutation selection, the runtime configuration contract, and negative validation (`expect_failures`) with no Docker or emulator.
+2. **Emulated clouds** — `crm-infra/compose.yaml` profiles run **LocalStack for AWS** (gateway `:4566`, service ports `4510-4559`) and **LocalStack for Azure** (gateway `:4567`, service ports `4610-4659`) side by side; Terraform providers switch endpoints only when `localstack_enabled = true` (the default).
+3. **Local baseline** — the `local` profile runs both databases and both APIs as plain containers with no cloud layer.
+4. **Smoke & E2E** — `crm-infra/scripts/smoke.sh` probes health and REST resources per permutation and optionally runs the Bruno suites.
+
+Real-cloud deployment uses the identical code with `TF_VAR_localstack_enabled=false` and real credentials.
+
+### Rationales & Authoritative Sources
+
+1. **Test Pyramid for Infrastructure**:
+   - Cheap, fast mocked plans/applies at the base; emulator deployments in the middle; Bruno E2E at the top.
+   - *References*:
+     - Martin Fowler: [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html).
+     - HashiCorp: [Terraform Tests](https://developer.hashicorp.com/terraform/language/tests) & [Mocks and Overrides](https://developer.hashicorp.com/terraform/language/tests/mocking).
+     - Microsoft Learn: [Testing Terraform Code (Best Practices)](https://learn.microsoft.com/en-us/azure/developer/terraform/best-practices-testing-overview).
+
+2. **High-Fidelity Local Cloud Emulation**:
+   - *References*:
+     - LocalStack: [Terraform Integration](https://docs.localstack.cloud/aws/integrations/infrastructure-as-code/terraform/) — Provider endpoint overrides and `skip_*` flags.
+     - LocalStack: [Configuration Reference](https://docs.localstack.cloud/aws/capabilities/config/configuration/) — `GATEWAY_LISTEN`, `EXTERNAL_SERVICE_PORTS_START/END`, `PERSISTENCE`.
+     - LocalStack: [LocalStack for Azure](https://docs.localstack.cloud/azure/) & [Auth Tokens](https://docs.localstack.cloud/aws/getting-started/auth-token/).
+     - The Twelve-Factor App: [X. Dev/Prod Parity](https://12factor.net/dev-prod-parity).
+
+3. **Profiles & Health-Gated Startup**:
+   - *References*:
+     - Docker: [Using Profiles with Compose](https://docs.docker.com/compose/how-tos/profiles/) & [Compose Services Reference (`healthcheck`, `depends_on`)](https://docs.docker.com/reference/compose-file/services/).
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Zero-Cost, Credential-Free Iteration**: All 12 permutations (3 targets × 2 runtimes × 2 engines) are exercisable on a laptop with dummy credentials (`test` / `test`).
+- **Fast Feedback in CI**: Offline `terraform test` runs in seconds and catches contract regressions (e.g. secrets leaking into plain `environment`) before any container is built.
+- **Concurrent Multi-Cloud Emulation**: Non-overlapping port ranges allow AWS and Azure stacks to run simultaneously for migration rehearsals.
+
+#### Architectural Guardrails & Governance
+- **Emulator ≠ Production**: Emulator behavior can differ from real services (e.g. TLS, IAM enforcement, quotas). Real-cloud runs remain necessary before production and must restrict network access first.
+- **Auth Token Hygiene**: `LOCALSTACK_AUTH_TOKEN` lives only in the git-ignored `crm-infra/.env`; scripts fail fast when it is missing.
+- **Pin Emulator Versions for Reproducibility**: `LOCALSTACK_AWS_IMAGE_TAG` / `LOCALSTACK_AZURE_IMAGE_TAG` default to `latest` for convenience; CI and shared demos should pin calendar versions.
+
+---
+
+## ADR 12: Immutable Content-Addressed Images, Platform Secret Stores, and One-Shot Schema Migrators
+
+### Status
+Accepted
+
+### Context
+Each sub-repository ships a `Dockerfile`. Those images must run unchanged on local Docker, ECS Fargate, and Azure Container Apps; roll out automatically when — and only when — source changes; never embed credentials; and deploy database schemas (DACPAC for SQL Server, versioned migrations for PostgreSQL) against managed endpoints that have no shell access.
+
+### Decision
+- **Immutable, content-addressed images**: `modules/shared/container-image` tags each image with a SHA-1 of its build context and pushes to registries with immutable tags (Amazon ECR `IMMUTABLE`, Azure Container Registry). Images are multi-stage and run as non-root users; all environment-specific settings arrive via environment variables documented in each repository's `.env.example`.
+- **Platform secret stores**: connection strings are delivered only through AWS Secrets Manager (ECS task `secrets`) or Azure Container App secrets (`secret_name` references), never as plain environment values. Credentials are generated with `random_password` and marked `sensitive`.
+- **One-shot schema migrators**: `modules/shared/database-schema` reuses each database repository image as an admin process (`CRMDatabaseMS/publish.sh` for DACPAC publish + seed; the `CRMDatabasePG` init entrypoint for `V1..Vn` migrations + seed), executed via `terraform_data` + `local-exec` and re-triggered only when the image, endpoint, or seed mode changes. API services `depends_on` schema deployment.
+
+### Rationales & Authoritative Sources
+
+1. **Immutable Infrastructure & Build/Release/Run Separation**:
+   - *References*:
+     - Martin Fowler: [ImmutableServer](https://martinfowler.com/bliki/ImmutableServer.html) & [PhoenixServer](https://martinfowler.com/bliki/PhoenixServer.html).
+     - The Twelve-Factor App: [V. Build, Release, Run](https://12factor.net/build-release-run).
+     - Open Container Initiative: [Image Annotations (`org.opencontainers.image.*`)](https://github.com/opencontainers/image-spec/blob/main/annotations.md).
+
+2. **Secure, Minimal Container Images**:
+   - *References*:
+     - Docker: [Building Best Practices (multi-stage builds, non-root users)](https://docs.docker.com/build/building/best-practices/).
+     - OWASP Foundation: [Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html).
+
+3. **Secrets Never in Plain Configuration**:
+   - *References*:
+     - AWS: [Pass Sensitive Data to an Amazon ECS Container](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data-secrets.html).
+     - Microsoft Learn: [Manage Secrets in Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets).
+     - HashiCorp: [Input Variables — Suppressing Values in CLI Output (`sensitive`)](https://developer.hashicorp.com/terraform/language/values/variables).
+     - OWASP Foundation: [Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
+
+4. **Schema Deployment as an Admin Process Owned by the Database Repository**:
+   - Reusing the database repositories' own tooling keeps DACPAC and migration logic single-sourced (ADR 1, ADR 8) and makes schema deployment identical on emulators and real clouds.
+   - *References*:
+     - The Twelve-Factor App: [XII. Admin Processes](https://12factor.net/admin-processes).
+     - Pramod Sadalage & Martin Fowler: [Evolutionary Database Design](https://martinfowler.com/articles/evodb.html).
+     - HashiCorp: [The `terraform_data` Managed Resource](https://developer.hashicorp.com/terraform/language/resources/terraform-data).
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Deterministic Rollouts**: Unchanged source produces the same tag and therefore no redeploy; changed source always produces a new, immutable tag.
+- **One Image, Every Environment**: The exact artifact verified locally is the artifact running on ECS or Container Apps.
+- **No Credentials in Images, Plans, or Command Lines**: Secrets flow from `random_password` → secret store → container, and migrator credentials travel through process environment only.
+
+#### Architectural Guardrails & Governance
+- **Host-Side Migrator Reachability**: Because migrators run on the operator's Docker daemon, databases must be reachable from `database_admin_cidrs` / `database_firewall_rules`. These must be restricted to known IPs on real clouds.
+- **Documented Sensitivity Exceptions**: The migrator unwraps sensitive values with `nonsensitive(...)` solely so Terraform streams migrator logs; any further use of `nonsensitive` requires an inline justification.
+- **Platform Constraints**: The SQL Server migrator image is `linux/amd64`-only (`migrator_platform` in `crm-catalog`); API images target `var.image_platform` and must be `linux/amd64` for real Azure Container Apps.
+
+---
+
+## ADR 13: Universal Coding Standards: Functional Core, Immutability, and Command-Query Separation
+
+### Status
+Accepted
+
+### Context
+The workspace spans C#, Kotlin, T-SQL, PL/pgSQL, Python, Bash, HCL, and YAML across five codebases (`CrmApiCSharp`, `CrmApiKotlinSpringBoot`, `CRMDatabaseMS`, `CRMDatabasePG`, `crm-infra/`). Without shared rules, each codebase evolves its own idioms, and the architectural guarantees above (immutable value objects, pure query compilation, isolated I/O, injection safety) erode one change at a time.
+
+### Decision
+Adopt one set of **universal coding standards**, specified in the [Master Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md) and restated self-contained in every codebase:
+
+| Pillar | C# | Kotlin | SQL (T-SQL / PL/pgSQL) | Infrastructure (HCL / Bash) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Functional over loops** | LINQ projections | `map` / `filter` / `fold` / `generateSequence` | Set-based queries, tally CTEs, `generate_series` | `for` expressions, `for_each`, `jq` pipelines |
+| **Immutability** | `record` + `init`, `ImmutableArray<T>`, `FrozenDictionary` | `data class` + `val`, read-only `List` / `Map` | Immutable Flyway migrations, audit columns | `locals`, `readonly`, content-hash image tags |
+| **Explicit side effects (CQS)** | `Get*` vs `Execute*` | `get*` / `to*` vs `execute*` / `open*` | Deterministic functions vs procedures with `XACT_ABORT` | Pure modules vs resource modules; `# Pure query` / `# Side effect` |
+| **Zero magic numbers** | `const`, `StatusCodes.*` | `const val`, `HttpStatus.*` | `DECLARE @BatchSize` | Named `locals`, `readonly DEFAULT_*` |
+| **Helpers & extensions** | `static class ...Extensions` | Top-level extension functions | Shared runner scripts | Shared modules, `lib.sh` |
+
+Codebase-specific standards: [CrmApiCSharp](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/CODING_STANDARDS.md) · [CrmApiKotlinSpringBoot](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) · [CRMDatabaseMS](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md) · [CRMDatabasePG](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md) · [crm-infra/](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md).
+
+### Rationales & Authoritative Sources
+
+1. **Command-Query Separation & Functional Core, Imperative Shell**:
+   - Pure query construction (SqlKata / `SqlQuery`, `crm-catalog`, `crm-runtime-config`) is trivially testable; I/O is confined to thin, explicit boundaries.
+   - *References*:
+     - Martin Fowler: [CommandQuerySeparation](https://martinfowler.com/bliki/CommandQuerySeparation.html).
+     - Gary Bernhardt: [Functional Core, Imperative Shell](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell).
+
+2. **Immutability & Value Semantics**:
+   - *References*:
+     - Martin Fowler: [Value Object](https://martinfowler.com/bliki/ValueObject.html).
+     - JetBrains: [Kotlin Collections Overview (read-only vs mutable)](https://kotlinlang.org/docs/collections-overview.html).
+
+3. **Language-Specific Style Authorities**:
+   - *References*:
+     - Microsoft Learn: [C# Coding Conventions](https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions).
+     - JetBrains: [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html).
+     - HashiCorp: [Terraform Style Guide](https://developer.hashicorp.com/terraform/language/style) & [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt).
+     - Google: [Shell Style Guide](https://google.github.io/styleguide/shellguide.html) & [ShellCheck](https://www.shellcheck.net/).
+
+4. **Injection Safety by Construction**:
+   - *References*:
+     - OWASP Foundation: [SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html) — Parameterized queries and identifier whitelisting (`IsSafeSqlIdentifier()` / `isSafeSqlIdentifier()`), plus `psql -v` bind variables in migration runners.
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Uniform Reviewability**: The same five pillars apply to every pull request regardless of language, making cross-codebase review and onboarding predictable.
+- **Architecture Preserved in the Small**: Immutable value objects, pure compilers, and isolated I/O are enforced at the line level, not only in diagrams.
+
+#### Architectural Guardrails & Governance
+- **Automated Enforcement**: The workspace `pre-commit` hook ([`.githooks/pre-commit`](file:///Users/cy/codes/localstack-reference-architecture/.githooks/pre-commit)) formats staged files and removes unused `using` / `import` statements across the root repository, all submodules, and the nested `crm-infra/` repository. HCL formatting is enforced with `terraform fmt -check -recursive crm-infra/terraform`.
+- **Documented Exceptions Only**: Imperative loops, `nonsensitive(...)`, or other deviations require an inline comment explaining why the standard construct was rejected.
