@@ -13,10 +13,15 @@ readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly DOTNET_BIN="${DOTNET_BIN:-$(command -v dotnet || echo /Users/cy/.dotnet/dotnet)}"
 readonly DOCKER_BIN="${DOCKER_BIN:-$(command -v docker || echo /opt/homebrew/bin/docker)}"
 
-readonly MS_CONTAINER_NAME="crm-database-ms"
+readonly MS_CONTAINER_NAME="crm-reference-architecture-crm-database-ms-1"
 readonly MS_DB_NAME="CRMDatabaseMS"
 readonly MS_SA_PASSWORD="${MSSQL_SA_PASSWORD:-CrmDev2026!Secure#Pass}"
-readonly PG_CONTAINER_NAME="crm_database_pg"
+readonly PG_CONTAINER_NAME="crm-reference-architecture-crm-database-pg-1"
+
+export ConnectionStrings__CRMDatabaseMS="Server=localhost,11433;Database=${MS_DB_NAME};User Id=sa;Password=${MS_SA_PASSWORD};TrustServerCertificate=True;"
+export ConnectionStrings__CRMDatabasePG="Host=localhost;Port=15432;Database=CRMDatabase;Username=postgres;Password=postgres;"
+export CONNECTIONSTRINGS_CRMDATABASEMS="${ConnectionStrings__CRMDatabaseMS}"
+export CONNECTIONSTRINGS_CRMDATABASEPG="${ConnectionStrings__CRMDatabasePG}"
 
 readonly API_PORT=5172
 readonly API_BASE_URL="http://localhost:${API_PORT}"
@@ -84,7 +89,7 @@ print_banner "STEP 5: CrmApiKotlinSpringBoot - Build & Run JUnit 5 Test Suites"
 "${ROOT_DIR}/CrmApiKotlinSpringBoot/gradlew" -p "${ROOT_DIR}/CrmApiKotlinSpringBoot" test bootJar --no-daemon
 
 print_banner "STEP 6: CrmApiKotlinSpringBoot - Run Bruno E2E API Suite (Local-MsSql & Local-Postgres)"
-java -jar "${ROOT_DIR}"/CrmApiKotlinSpringBoot/build/libs/*.jar --server.port="${API_PORT}" >"${API_LOG_PATH}" 2>&1 &
+java -jar "${ROOT_DIR}"/CrmApiKotlinSpringBoot/build/libs/CrmApiKotlinSpringBoot-1.0.0.jar --server.port="${API_PORT}" >"${API_LOG_PATH}" 2>&1 &
 KOTLIN_API_PID=$!
 trap 'kill "${KOTLIN_API_PID}" 2>/dev/null || true' EXIT
 
