@@ -64,5 +64,5 @@ Welcome to the **LocalStack Reference Architecture** workspace. This repository 
 ## 5. Communication & Output Style
 
 - Be concise and direct in explanations.
-- Reference modified files and symbols with clickable markdown file links (`[filename](file:///path/to/file)`).
+- Reference modified files and symbols with clickable markdown file links (`[filename](file:///absolute/path/to/file)`).
 - When introducing new services or infrastructure components, provide clear run instructions or quick verification commands (e.g., `awslocal` or `curl`).

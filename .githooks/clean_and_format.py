@@ -29,7 +29,7 @@ KOTLIN_IDENTIFIER_PATTERN: re.Pattern[str] = re.compile(
     r"`[^`]+`|[A-Za-z_][A-Za-z0-9_]*"
 )
 TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {".cs", ".kt", ".kts", ".py", ".sql", ".sh", ".md", ".json", ".yml", ".yaml", ".props", ".slnx"}
+    {".cs", ".kt", ".kts", ".py", ".sql", ".sh", ".md", ".json", ".yml", ".yaml", ".props", ".slnx", ".tf", ".tfvars", ".hcl"}
 )
 EXCLUDED_PATH_SEGMENTS: tuple[str, ...] = (
     "/.air/",
@@ -387,8 +387,30 @@ def format_csharp_workspace(repo_root: str, csharp_files: tuple[str, ...]) -> se
 
 
 # ============================================================================
-# Shell & Generic Text Formatting
+# Terraform, Shell & Generic Text Formatting
 # ============================================================================
+
+def format_terraform_files(tf_files: tuple[str, ...]) -> set[str]:
+    """Formats Terraform files (.tf, .tfvars) using `terraform fmt` if installed."""
+    if not tf_files:
+        return set()
+    terraform_bin = shutil.which("terraform") or "/opt/homebrew/bin/terraform"
+    if not os.path.exists(terraform_bin):
+        return set()
+
+    modified: set[str] = set()
+    for filepath in tf_files:
+        if not os.path.isfile(filepath):
+            continue
+        with open(filepath, "r", encoding="utf-8") as f:
+            original = f.read()
+        subprocess.run([terraform_bin, "fmt", filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        with open(filepath, "r", encoding="utf-8") as f:
+            formatted = f.read()
+        if formatted != original:
+            modified.add(filepath)
+    return modified
+
 
 def format_generic_file(filepath: str) -> bool:
     """Formats shell scripts (via shfmt if installed) and normalizes whitespace/newlines."""
@@ -450,12 +472,29 @@ def main() -> int:
     csharp_files = tuple(f for f in target_files if f.endswith(".cs"))
     kotlin_files = tuple(f for f in target_files if f.endswith((".kt", ".kts")))
     python_files = tuple(f for f in target_files if f.endswith(".py"))
-    other_files = tuple(f for f in target_files if not f.endswith((".cs", ".kt", ".kts", ".py")))
+    terraform_files = tuple(f for f in target_files if f.endswith((".tf", ".tfvars")))
+    shell_files = tuple(f for f in target_files if f.endswith(".sh"))
+    other_files = tuple(f for f in target_files if not f.endswith((".cs", ".kt", ".kts", ".py", ".tf", ".tfvars")))
+
+    # Advisory checks for optional external linters / formatters
+    missing_tools: list[str] = []
+    if kotlin_files and not shutil.which("ktlint"):
+        missing_tools.append("ktlint")
+    if shell_files and not shutil.which("shfmt"):
+        missing_tools.append("shfmt")
+    if shell_files and not shutil.which("shellcheck"):
+        missing_tools.append("shellcheck")
+
+    if missing_tools:
+        print(f"  [Notice] Optional code quality tools not found: {', '.join(missing_tools)} (install via brew/package manager for full local linting)")
 
     modified_files: set[str] = set()
 
     if csharp_files:
         modified_files.update(format_csharp_workspace(repo_root, csharp_files))
+
+    if terraform_files:
+        modified_files.update(format_terraform_files(terraform_files))
 
     for kt_file in kotlin_files:
         if format_kotlin_file(kt_file):

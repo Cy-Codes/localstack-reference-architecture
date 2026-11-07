@@ -51,6 +51,13 @@ for abs_file in "${STAGED_FILES[@]}"; do
             *.sh)
                 bash -n "${abs_file}"
                 ;;
+            *.tf|*.tfvars)
+                if command -v terraform >/dev/null 2>&1; then
+                    terraform fmt "${abs_file}" >/dev/null 2>&1 || true
+                elif [ -x "/opt/homebrew/bin/terraform" ]; then
+                    /opt/homebrew/bin/terraform fmt "${abs_file}" >/dev/null 2>&1 || true
+                fi
+                ;;
         esac
         git add "${abs_file}"
     fi

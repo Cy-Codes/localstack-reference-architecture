@@ -94,6 +94,13 @@ Use **SqlKata** as an object-oriented query builder and **Dapper** as the execut
      - Pramod Sadalage & Martin Fowler: [Evolutionary Database Design](https://martinfowler.com/articles/evodb.html) — Outlines why database migrations must be independently versioned and automated alongside application deployments rather than generated implicitly.
      - Martin Fowler: [Database Migration Pattern](https://martinfowler.com/patterns/database-migration.html).
 
+6. **Concurrent Migration Serialization & Advisory Locking**:
+   - Preventing race conditions during parallel CI/CD runs or multi-instance provisioning requires explicit distributed mutex acquisition at the database engine level.
+   - *References*:
+     - PostgreSQL Global Development Group: [PostgreSQL Explicit Locking & Advisory Locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS) — Application-defined mutual exclusion locks (`pg_advisory_lock`).
+     - Microsoft Learn: [sp_getapplock (Transact-SQL)](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-getapplock-transact-sql) — Application-level resource locking in SQL Server.
+     - PostgreSQL Global Development Group: [psql Documentation: Variables and Interpolation](https://www.postgresql.org/docs/current/app-psql.html#APP-PSQL-VARIABLES) — Using stdin streaming vs `-c` execution for `:'variable'` syntax.
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -106,6 +113,8 @@ Use **SqlKata** as an object-oriented query builder and **Dapper** as the execut
 - **Explicit Graph Mapping over Magic Lazy Loading**: Deep hierarchical object graphs (e.g. Accounts with multiple Contact and Opportunity collections) require explicit mapping queries or DataLoader batching rather than ORM navigation properties. This deliberate trade-off trades implicit, uncontrolled queries for explicit, predictable performance.
 - **Automated Schema Verification in CI**: To guard against column name drift between database schemas and Dapper models, automated integration tests and database schema verification suites execute on every pull request, ensuring model fidelity without requiring heavy ORM metadata scaffolding.
 - **Hand-Rolled Compiler Scope Discipline (Kotlin)**: The Kotlin `SqlQuery` AST intentionally supports only the clauses the API needs (equality, `LIKE`, `IN (subquery)`, ordering, pagination). New clause types must be added as new sealed `WhereClause` variants with matching `SqlCompilerTests` for both dialects, never as raw SQL fragments.
+- **Migration Script Execution & Variable Interpolation**: CLI migrators must pass SQL via standard input (e.g. `psql -v ...` with piped input as in `migrate.sh`) rather than `-c` flags, as PostgreSQL `psql` does not interpolate `:'variable'` expressions in command-line strings.
+- **Concurrent Migration & Seed Serialization**: Migration runners must acquire mutual-exclusion locks (such as `pg_advisory_lock` in PostgreSQL and `sp_getapplock` within SQL Server seed/ETL procedures) and execute DDL and `schema_version` history recordings inside single transactions to prevent race conditions during concurrent CI or infrastructure provisioning runs.
 
 ---
 
@@ -140,6 +149,13 @@ Adopt route templates parameterized by the provider token constrained by regex:
      - Microsoft Learn: [Routing in ASP.NET Core & Route Constraints](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/routing).
      - Spring Framework Documentation: [Spring Web MVC URI Patterns](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html) — Regex-constrained URI variables (`/api/{provider:^(?:ms|pg)$}/v1/...`) used by the Kotlin controllers.
 
+3. **Liveness vs. Readiness Health Probes in Distributed Systems**:
+   - Separating liveness (process vitality) from readiness (dependent storage and schema availability) prevents routing traffic during database restarts or migration initialization windows.
+   - *References*:
+     - Brendan Burns, Joe Beda, Kelsey Hightower: *Kubernetes: Up and Running* (O'Reilly) & Kubernetes Documentation: [Pod Lifecycle: Container Probes](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes).
+     - Spring Boot Documentation: [Liveness and Readiness Probes](https://docs.spring.io/spring-boot/reference/actuator/endpoints.html#actuator.endpoints.kubernetes-probes).
+     - Microsoft Learn: [Health Checks in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -150,6 +166,7 @@ Adopt route templates parameterized by the provider token constrained by regex:
 #### Architectural Guardrails & Governance
 - **Encapsulated Provider Context Propagation**: Every controller endpoint and query service accepts and propagates the `DatabaseProvider` discriminator to resolve the correct connection factory and compiler. This routing logic is strictly encapsulated via `BaseCrmController` and `IDbConnectionFactory` in both runtimes (`provider.ToDatabaseProvider()` / `provider.toDatabaseProvider()`), preventing provider-specific leaks into domain contracts.
 - **Strict Schema Parity Enforcement**: Both SQL Server and PostgreSQL database instances must strictly conform to identical entity definitions and column types, enforced via automated database schema assertion test suites (`CRMDatabaseMS/Tests/01_Schema_Structure_Tests.sql`, `CRMDatabasePG/tests/01_schema_structure_tests.sql`).
+- **Liveness vs. Readiness Health Probes**: Generic `/health` endpoints report liveness only (application process up); load balancers, orchestrators, and gateway routers must target database-verified readiness endpoints (`/health/ms` and `/health/pg` or schema readiness sentinels) to prevent routing production traffic during database restarts or schema initialization.
 
 ---
 
@@ -188,6 +205,19 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
      - Spring Framework Documentation: [Dependency Injection (Constructor-based)](https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html) — Constructor injection with immutable `private val` collaborators in the Kotlin runtime.
      - Spring Framework Documentation: [Kotlin Support](https://docs.spring.io/spring-framework/reference/languages/kotlin.html) — Final-by-default classes opened by `kotlin("plugin.spring")`, null-safety via `-Xjsr305=strict`.
 
+3. **Automated Architectural Fitness Functions & Boundary Testing**:
+   - Enforcing package boundaries and dependency rules automatically in continuous integration prevents architectural erosion over time.
+   - *References*:
+     - Neal Ford, Rebecca Parsons, Patrick Kua: *Building Evolutionary Architectures* (O'Reilly) — Architectural fitness functions for automated dependency validation.
+     - ArchUnit: [ArchUnit User Guide](https://www.archunit.org/userguide/html/000_Index.html) & LemonAppDev: [Konsist Documentation](https://lemonappdev.github.io/konsist/) — Declarative architecture assertion tools for JVM and Kotlin codebases.
+
+4. **Perimeter Authentication and Zero Trust Edge Exposure**:
+   - APIs deployed to cloud environments must terminate identity at the edge boundary and enforce authorization before routing to application services.
+   - *References*:
+     - NIST: [SP 800-207: Zero Trust Architecture](https://csrc.nist.gov/publications/detail/sp/800-207/final).
+     - OWASP Foundation: [API Security Top 10](https://owasp.org/www-project-api-security/) — API1: Broken Object Level Authorization & API2: Broken Authentication.
+     - Spring Security Reference: [Spring Security Architecture](https://docs.spring.io/spring-security/reference/index.html).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -197,8 +227,9 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
 
 #### Architectural Guardrails & Governance
 - **Strict Layer Boundary Enforcement**: Developers must resist leaking infrastructure concerns (e.g. `SqlConnection`, raw SQL strings) or transport concerns (e.g. `HttpContext`, HTTP status codes) into the `Domain` or `Application` layers. In C# this is enforced via compile-time project reference boundaries.
-- **Package-Level Boundaries in Kotlin**: Because the Kotlin layers share one Gradle module, boundaries are enforced by code review and the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) rather than the compiler. The `domain` package may depend only on the Kotlin standard library and `kotlinx.serialization` annotations; splitting into Gradle subprojects (or adding architecture tests) is the escalation path if violations appear.
+- **Package-Level Boundaries in Kotlin**: Because the Kotlin layers share one Gradle module, boundaries are enforced by code review and the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) rather than the compiler. The `domain` package may depend only on the Kotlin standard library and `kotlinx.serialization` annotations; automated architecture test suites (e.g. ArchUnit or Konsist) or multi-module Gradle subprojects are required to prevent illegal layer imports.
 - **Separated Interface Governance**: Every repository and query service is governed by an explicit interface (`ISalesforceQueryService`, `ISalesforceRepository`), ensuring that implementations remain interchangeable and fully mockable during testing.
+- **Authentication & Authorization Perimeter**: Real-cloud edge deployments must introduce non-bypassable authentication and authorization middleware (e.g. ASP.NET Core JWT/OAuth2 authentication and Spring Security) before routing public ingress through load balancers or API gateways.
 
 ---
 
@@ -237,6 +268,12 @@ Implement **HotChocolate GraphQL** utilizing the `IDataLoader` pattern for batch
      - Spring for GraphQL: [Annotated Controllers & `@BatchMapping`](https://docs.spring.io/spring-graphql/reference/controllers.html) — DataLoader-backed batch resolution on Spring.
      - GraphQL Java: [java-dataloader](https://github.com/graphql-java/java-dataloader) — JVM port of the DataLoader batching pattern.
 
+4. **Query Depth & Complexity Protection (Denial of Service Prevention)**:
+   - Client-driven nested queries can be weaponized into cyclic or combinatorial database exhaustion attacks without static depth and complexity limits.
+   - *References*:
+     - OWASP Foundation: [GraphQL Cheat Sheet: Denial of Service Prevention](https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html#denial-of-service).
+     - ChilliCream: [HotChocolate Security: Execution Depth and Operation Complexity](https://chillicream.com/docs/hotchocolate/v13/security).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -247,7 +284,8 @@ Implement **HotChocolate GraphQL** utilizing the `IDataLoader` pattern for batch
 #### Architectural Guardrails & Governance
 - **Schema Type Governance**: Code-first GraphQL schema definitions (`SalesforceAccountType`, `SalesforceContactType`) must be explicitly declared and maintained to expose child navigation fields and link DataLoaders cleanly.
 - **Query Complexity Protection**: While field selection is client-driven, production deployments must enforce HotChocolate query depth and complexity limits (`AddMaxExecutionDepth`, `AddMaxAllowedPagingBounds`) to guard the database against maliciously nested or recursive GraphQL requests.
-- **Kotlin Operation Catalog Governance**: The Kotlin endpoint only recognizes operations listed in `GraphqlController.OPERATION_REGEX` and rejects everything else with a GraphQL `errors` payload (HTTP 400). Adding an operation requires updating the resolver, the regex catalog, `GraphQLEndpointTests`, and the Bruno `04-GraphQL` collection together, keeping parity with the C# schema.
+- **Kotlin Operation Catalog Governance**: The Kotlin endpoint currently recognizes operations listed in `GraphqlController.OPERATION_REGEX` and rejects everything else with a GraphQL `errors` payload (HTTP 400). Adding an operation requires updating the resolver, the regex catalog, `GraphQLEndpointTests`, and the Bruno `04-GraphQL` collection together, keeping parity with the C# schema.
+- **Specification-Compliant Kotlin GraphQL Engine**: Regex-based operation matching is limited to flat queries without support for nested selections, fragments, variables, or aliases. Upgrading to a spec-compliant GraphQL framework (Spring for GraphQL / Apollo Kotlin / GraphQL Java with DataLoader) is required before exposing nested child navigation on the JVM runtime.
 
 ---
 
@@ -290,6 +328,15 @@ Implement the **Abstract Factory Pattern** (`IDbConnectionFactory`, `ISqlKataCom
      - Spring Boot Documentation: [Externalized Configuration & Relaxed Binding](https://docs.spring.io/spring-boot/reference/features/external-config.html).
      - The Twelve-Factor App: [III. Config](https://12factor.net/config) — Store configuration in the environment.
 
+5. **Connection Pooling, Timeouts, and Circuit Resilience (Michael Nygard & HikariCP)**:
+   - High-throughput database access mandates pooled connection reuse with explicit timeouts to prevent cascading connection starvation under load.
+   - *References*:
+     - Michael Nygard: *Release It! Design and Deploy Production-Ready Software* (Pragmatic Bookshelf) — Patterns for Stability: Connection Pools, Timeouts, and Fail Fast.
+     - Brett Wooldridge: [HikariCP: High-Performance JDBC Connection Pool](https://github.com/brettwooldridge/HikariCP).
+     - Microsoft Learn: [Options Validation in ASP.NET Core (`ValidateOnStart`)](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/configuration/options#options-validation).
+     - Spring Boot Documentation: [Validated Configuration Properties](https://docs.spring.io/spring-boot/reference/features/external-config.html#features.external-config.typesafe-configuration-properties.validation).
+     - Polly: [Polly .NET Transient Fault Handling Library](https://github.com/App-vNext/Polly) & Spring: [Spring Retry Documentation](https://github.com/spring-projects/spring-retry).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -299,7 +346,9 @@ Implement the **Abstract Factory Pattern** (`IDbConnectionFactory`, `ISqlKataCom
 
 #### Architectural Guardrails & Governance
 - **Connection Pooling & Transient Fault Governance**: Direct ADO.NET connection creation relies on connection pooling configured within connection strings. Production environments must configure transient connection retry policies (e.g. `EnableRetryOnFailure` or Polly execution policies) within the factory implementation.
-- **JVM Connection Pooling (Kotlin)**: The Kotlin `DbConnectionFactory` currently opens connections through `java.sql.DriverManager`, which does not pool. Before production load, the factory must be backed by a pooled `DataSource` (e.g. [HikariCP](https://github.com/brettwooldridge/HikariCP)) behind the same `IDbConnectionFactory` interface, leaving repositories untouched.
+- **JVM Connection Pooling & Lifecycle (Kotlin)**: The Kotlin `DbConnectionFactory` must be backed by a high-performance connection pool (HikariCP `DataSource`) rather than raw `java.sql.DriverManager.getConnection`. Connection and statement timeouts (`connectionTimeout`, `loginTimeout`, `statement.queryTimeout`) must be explicitly configured to prevent stalled queries from starving request threads.
+- **Credential & JDBC URL Contract Fidelity**: Connection string parsers must accurately honor credentials supplied in raw `jdbc:` URLs and environment variables without reverting to hardcoded development defaults.
+- **Fail-Fast Startup Configuration Validation**: Database connection strings and mandatory operational settings must be validated during application startup (`ValidateOnStart` in .NET, `@ConfigurationProperties` + `@Validated` in Spring Boot) rather than failing lazily on the first inbound request.
 - **Repository Granularity**: Generic query execution is centralized in `BaseRepository`, while domain-specific entity queries reside in dedicated CRM repositories (`SalesforceRepository`, etc.), preventing god-object anti-patterns.
 
 ---
@@ -372,6 +421,13 @@ Model query parameters as an immutable `QueryOptions` record and return response
    - *References*:
      - Microsoft: [Microsoft REST API Guidelines Section 9 (Collections)](https://github.com/microsoft/api-guidelines#9-collections).
 
+3. **Defensive Arithmetic & Integer Overflow Prevention (CWE-190)**:
+   - Paging arithmetic (`(page - 1) * pageSize`) must be guarded against 32-bit signed integer overflow to prevent negative database offsets and unexpected query behavior.
+   - *References*:
+     - MITRE: [CWE-190: Integer Overflow or Wraparound](https://cwe.mitre.org/data/definitions/190.html).
+     - SEI CERT: [Java Coding Standard: NUM00-J Detect or prevent integer overflow](https://wiki.sei.cmu.edu/confluence/display/java/NUM00-J.+Detect+or+prevent+integer+overflow).
+     - Markus Winand: *SQL Performance Explained* & [Use The Index, Luke! Pagination](https://use-the-index-luke.com/sql/partial-results/fetch-next-page) — Offset pagination mechanics and performance bounds.
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -381,6 +437,8 @@ Model query parameters as an immutable `QueryOptions` record and return response
 
 #### Architectural Guardrails & Governance
 - **Bounded Page Sizes to Guard Against Database Exhaustion**: The `BaseRepository` hard-caps `pageSize` to a maximum of 100 records (defaulting to 20), preventing malicious or poorly designed client queries from attempting to load millions of records into memory at once. Both runtimes must keep these limits identical (`QueryOptions.MaxPageSize` / `QueryOptions.MAX_PAGE_SIZE`).
+- **Paging Arithmetic & Integer Overflow Guards**: Paging offset calculations (`(page - 1) * pageSize`) must be validated against 32-bit integer overflow; requests specifying out-of-range `page` numbers must be rejected with HTTP 400 Bad Request rather than wrapping to negative offsets and triggering database query errors.
+- **Unbounded Relationship Collection Guards**: Repository child collection loaders must enforce explicit `LIMIT` / `TOP` caps or pagination bounds rather than buffering unbounded child entity sets into memory.
 - **Deep-Offset Query Latency**: While offset pagination (`OFFSET...FETCH` / `LIMIT...OFFSET`) is optimal and expected for standard CRM interactive navigation (pages 1 through 100), extremely deep offsets (e.g. page 10,000+) incur database scan costs. For massive bulk export scenarios, dedicated bulk ETL procedures or keyset pagination patterns should be introduced as a complementary pattern.
 
 ---
@@ -439,6 +497,19 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
    - *References*:
      - AWS: [AWS Well-Architected Framework: Performance Efficiency & Reliability](https://aws.amazon.com/architecture/well-architected/).
 
+6. **Relational Integrity Invariants & Codd's Relational Foundation**:
+   - Relational database management systems are engineered to enforce mathematical integrity constraints at the storage tier, ensuring data consistency that application tiers cannot guarantee under concurrent access.
+   - *References*:
+     - Edgar F. Codd: *A Relational Model of Data for Large Shared Data Banks* (Communications of the ACM, 1970) — Formal foundations of entity integrity, referential integrity, and relational keys.
+     - C.J. Date: *An Introduction to Database Systems* (Addison-Wesley, 8th ed.) — Declarative integrity constraints vs procedural application checks.
+
+7. **Optimistic Concurrency Control & Idempotent Mutations**:
+   - Preventing lost updates and race conditions on write operations requires version tokens and standardized conditional requests.
+   - *References*:
+     - Martin Fowler: [Optimistic Offline Lock](https://martinfowler.com/eaaCatalog/optimisticOfflineLock.html) (*P of EAA*).
+     - IETF RFC 9110: [HTTP Semantics — Conditional Requests (`ETag`, `If-Match`)](https://datatracker.ietf.org/doc/html/rfc9110#section-13.1.1).
+     - IETF: [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -451,7 +522,8 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
 #### Architectural Guardrails & Governance
 - **Strict Encapsulation (No Direct DB Write Access)**: Direct write access to relational storage from reporting tools, third-party consumers, or ad-hoc scripts is explicitly denied. All mutations must route through API domain services.
 - **Structural Invariants at the Storage Tier**: The database layer is not passive; it rigorously enforces declarative relational invariants (primary keys, foreign keys, unique constraints, NOT NULL constraints, check constraints, and ACID transactions), guaranteeing that no invalid or orphaned data can ever be persisted under any operational circumstance.
-- **Network-Level Encapsulation in Deployed Environments**: In `crm-infra/`, database security groups and firewall rules admit only the API tasks plus explicitly configured admin/migrator ranges (`database_admin_cidrs` on AWS, `database_firewall_rules` on Azure). These ranges default to open for emulator convenience and must be narrowed to known IPs before any real-cloud deployment (see ADR 12).
+- **Network-Level Encapsulation in Deployed Environments**: In `crm-infra/`, database security groups and firewall rules admit only the API tasks plus explicitly configured admin/migrator ranges (`database_admin_cidrs` on AWS, `database_firewall_rules` on Azure). These ranges default to open for emulator convenience and must be restricted to private subnets/VNets and known IPs before any real-cloud deployment (see ADR 12).
+- **Concurrency & Write Guardrails**: When write paths are introduced, entities must enforce unique constraints on business keys (preventing check-then-insert races), utilize optimistic concurrency tokens (`rowversion` on SQL Server, `xmin` on PostgreSQL) with HTTP `ETag` / `If-Match` validation, and require client `Idempotency-Key` headers on POST endpoints.
 
 ---
 
@@ -489,6 +561,12 @@ Maintain **`CrmApiKotlinSpringBoot`** (Kotlin 2.x, Spring Boot, JDK 25 toolchain
    - *References*:
      - JetBrains: [Kotlin Serialization](https://kotlinlang.org/docs/serialization.html) & [Kotlin Serialization Guide](https://github.com/Kotlin/kotlinx.serialization/blob/master/docs/serialization-guide.md).
 
+4. **Reproducible Builds & Dependency Isolation**:
+   - Builds must declare dependencies deterministically so that offline compilation (`--offline`) remains fully functional and reproducible.
+   - *References*:
+     - The Twelve-Factor App: [II. Dependencies](https://12factor.net/dependencies) — Explicitly declare and isolate dependencies.
+     - Gradle User Manual: [Declaring Dependencies & Managing Transitive Dependencies](https://docs.gradle.org/current/userguide/declaring_dependencies.html).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -499,6 +577,8 @@ Maintain **`CrmApiKotlinSpringBoot`** (Kotlin 2.x, Spring Boot, JDK 25 toolchain
 #### Architectural Guardrails & Governance
 - **Parity Changes Ship Together**: Any new entity, route, filter, or error mapping must land in both runtimes and in both Bruno collections in the same change set; divergence is treated as a defect.
 - **Serializer Configuration Is Frozen**: Disabling `encodeDefaults`, switching to Jackson, or adding JavaBean-style DTOs is prohibited by the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md).
+- **Offline Build Dependency Integrity**: JDBC driver dependencies in `build.gradle.kts` must be declared unconditionally so that `--offline` Gradle builds retain required database drivers at runtime.
+- **Configuration Hygiene & Dead Config Removal**: Unused configuration sections (e.g. `crm.databases.*` in `application.yml`) must be removed or reconciled to prevent configuration drift with `ConnectionStrings.*`.
 
 ---
 
@@ -543,6 +623,12 @@ Use **Terraform** with a strict split between **shared, cloud-agnostic contract 
      - HashiCorp: [Terraform Workspaces](https://developer.hashicorp.com/terraform/language/state/workspaces) — Multiple state instances of one configuration.
      - HashiCorp: [`for_each` Meta-Argument](https://developer.hashicorp.com/terraform/language/meta-arguments/for_each) & [`for` Expressions](https://developer.hashicorp.com/terraform/language/expressions/for) — Stable, key-addressed collections of runtimes and engines.
 
+5. **Defense-in-Depth Cloud Network Security & TLS Enforcement**:
+   - Real-world cloud infrastructure mandates placing compute tasks in private subnets behind load balancers with mandatory in-transit TLS encryption.
+   - *References*:
+     - Center for Internet Security: [CIS AWS Foundations Benchmark](https://www.cisecurity.org/benchmark/amazon_web_services) & [CIS Microsoft Azure Foundations Benchmark](https://www.cisecurity.org/benchmark/azure) — Network security, subnet isolation, and TLS requirements.
+     - NIST: [SP 800-52 Rev. 2: Guidelines for the Selection, Configuration, and Use of TLS](https://csrc.nist.gov/publications/detail/sp/800-52/rev-2/final).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -553,6 +639,8 @@ Use **Terraform** with a strict split between **shared, cloud-agnostic contract 
 #### Architectural Guardrails & Governance
 - **No Cloud Logic in Shared Modules**: `modules/shared` must never contain `aws_*` or `azurerm_*` resources; enforced by review against the [Infrastructure Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md).
 - **Validated Selectors**: `api_runtimes` and `database_engines` are validated sets; unknown values fail at `plan` time.
+- **Edge TLS & Private Network Isolation**: Real cloud deployments on AWS and Azure must terminate TLS at the load balancer via ACM/Azure managed certificates and place container tasks in private subnets with NAT gateways rather than assigning public IPs.
+- **Database TLS Verification**: Connection strings in real-cloud environments must mandate verified TLS encryption (`Encrypt=True;TrustServerCertificate=False` on SQL Server, `SSL Mode=VerifyFull` on PostgreSQL) to prevent unencrypted or spoofed database transport.
 
 ---
 
@@ -593,6 +681,12 @@ Real-cloud deployment uses the identical code with `TF_VAR_localstack_enabled=fa
    - *References*:
      - Docker: [Using Profiles with Compose](https://docs.docker.com/compose/how-tos/profiles/) & [Compose Services Reference (`healthcheck`, `depends_on`)](https://docs.docker.com/reference/compose-file/services/).
 
+4. **Continuous Delivery & Automated Pipeline Governance**:
+   - Comprehensive CI pipelines validating root configurations, infrastructure modules, and application runtimes ensure rapid, defect-free release cycles.
+   - *References*:
+     - Jez Humble & David Farley: *Continuous Delivery: Reliable Software Releases through Build, Test, and Deployment Automation* (Addison-Wesley).
+     - Michael Nygard: *Release It!* (Pragmatic Bookshelf) — Health checks and self-healing startup sequences.
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -604,6 +698,8 @@ Real-cloud deployment uses the identical code with `TF_VAR_localstack_enabled=fa
 - **Emulator ≠ Production**: Emulator behavior can differ from real services (e.g. TLS, IAM enforcement, quotas). Real-cloud runs remain necessary before production and must restrict network access first.
 - **Auth Token Hygiene**: `LOCALSTACK_AUTH_TOKEN` lives only in the git-ignored `crm-infra/.env`; scripts fail fast when it is missing.
 - **Pin Emulator Versions for Reproducibility**: `LOCALSTACK_AWS_IMAGE_TAG` / `LOCALSTACK_AZURE_IMAGE_TAG` default to `latest` for convenience; CI and shared demos should pin calendar versions.
+- **Healthcheck Schema Gating & Connect Retries**: Container orchestration healthchecks must verify schema readiness (e.g. querying `schema_version` or seeded tables) rather than simple port connectivity (`SELECT 1`), and migrator scripts must implement bounded connection retry loops (e.g. `pg_isready` polling) to avoid startup race conditions.
+- **Continuous Integration for Root & Infrastructure**: Automated CI pipelines must validate the root repository and `crm-infra/` via Terraform format, validation, offline tests, and cross-repo smoke tests.
 
 ---
 
@@ -647,6 +743,12 @@ Each sub-repository ships a `Dockerfile`. Those images must run unchanged on loc
      - Pramod Sadalage & Martin Fowler: [Evolutionary Database Design](https://martinfowler.com/articles/evodb.html).
      - HashiCorp: [The `terraform_data` Managed Resource](https://developer.hashicorp.com/terraform/language/resources/terraform-data).
 
+5. **IAM Policy Eventual Consistency & Resource Dependency Sequencing**:
+   - Cloud resource provisioning must explicitly sequence IAM policy attachments to compute execution roles before launching tasks to prevent eventual consistency race conditions.
+   - *References*:
+     - AWS Documentation: [IAM Eventual Consistency & Error Handling](https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot_general.html#troubleshoot_general_eventual-consistency).
+     - AWS Well-Architected Framework: [Reliability Pillar — Data Protection and Deletion Safeguards](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/data-protection.html).
+
 ### Outcomes
 
 #### Strategic Architectural Advantages
@@ -655,7 +757,10 @@ Each sub-repository ships a `Dockerfile`. Those images must run unchanged on loc
 - **No Credentials in Images, Plans, or Command Lines**: Secrets flow from `random_password` → secret store → container, and migrator credentials travel through process environment only.
 
 #### Architectural Guardrails & Governance
-- **Host-Side Migrator Reachability**: Because migrators run on the operator's Docker daemon, databases must be reachable from `database_admin_cidrs` / `database_firewall_rules`. These must be restricted to known IPs on real clouds.
+- **Host-Side Migrator Reachability & In-VPC Migration**: Because migrators run on the operator's Docker daemon, databases must be reachable from `database_admin_cidrs` / `database_firewall_rules`. Real-cloud deployments should transition migrator execution to in-VPC/in-VNet one-shot container jobs (ECS run-task / Container Apps job) and close public database ingress entirely.
+- **IAM Policy Propagation & Dependency Ordering**: ECS services and task definitions must declare explicit `depends_on` relationships on execution role policies (e.g. `read_secrets`) to eliminate startup failures caused by IAM eventual consistency.
+- **Data Protection & Deletion Safeguards**: Managed database modules must expose `deletion_protection` (defaulting to `true` in production) and `skip_final_snapshot` (defaulting to `false`) to prevent accidental data loss.
+- **Zero Fallback Password Leakage**: Fallback development passwords in local compose and Dockerfile files must never be inherited by real-cloud infrastructure or automated deployment pipelines.
 - **Documented Sensitivity Exceptions**: The migrator unwraps sensitive values with `nonsensitive(...)` solely so Terraform streams migrator logs; any further use of `nonsensitive` requires an inline justification.
 - **Platform Constraints**: The SQL Server migrator image is `linux/amd64`-only (`migrator_platform` in `crm-catalog`); API images target `var.image_platform` and must be `linux/amd64` for real Azure Container Apps.
 
@@ -705,6 +810,12 @@ Codebase-specific standards: [CrmApiCSharp](file:///Users/cy/codes/localstack-re
 4. **Injection Safety by Construction**:
    - *References*:
      - OWASP Foundation: [SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html) — Parameterized queries and identifier whitelisting (`IsSafeSqlIdentifier()` / `isSafeSqlIdentifier()`), plus `psql -v` bind variables in migration runners.
+
+5. **Design by Contract & Automated Quality Governance**:
+   - Universal coding standards act as automated contracts across languages, enforced continuously via pre-commit hooks and static analysis tools.
+   - *References*:
+     - Bertrand Meyer: [Design by Contract](https://www.eiffel.com/values/design-by-contract/) & *Object-Oriented Software Construction* (Prentice Hall) — The foundational principle of Command-Query Separation (CQS) and invariant contracts.
+     - Neal Ford, Mark Richards: *Software Architecture: The Hard Parts* (O'Reilly) — Automated fitness functions and code governance across polyglot systems.
 
 ### Outcomes
 
