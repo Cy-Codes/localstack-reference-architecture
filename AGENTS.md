@@ -1,4 +1,4 @@
-# Agent Guidelines for LocalStack Reference Architecture
+# Agent Guidelines & Context for LocalStack Reference Architecture
 
 Welcome to the **LocalStack Reference Architecture** workspace. This repository / workspace is designed to house and demonstrate reference architectures, cloud-native emulation patterns, and local development workflows using LocalStack across multi-repo and multi-service systems.
 
@@ -20,7 +20,7 @@ These guidelines define standard behavior, code quality expectations, and domain
 
 ## 2. Core Operating Principles
 
-- **Plan Before Execution**: For non-trivial modifications or architectural decisions, present a concise plan outlining affected components before making destructive changes.
+- **Plan Before Execution**: For non-trivial modifications or architectural decisions, present a concise plan outlining affected components before making changes.
 - **Coding Standards Compliance**: All code written or modified must adhere strictly to the project's [Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CODING_STANDARDS.md):
   - **Functional Logic Over Loops**: Choose declarative transformations/maps over imperative loops (except benchmarked hot paths, streaming I/O, or batch log maintenance).
   - **Immutable Data by Default**: Use `record` with `init`, `data class` with `val`, `IReadOnlyList`, `ImmutableArray`, `IReadOnlyDictionary`, `FrozenDictionary`, `readonly struct`, or `@dataclass(frozen=True)`.
@@ -45,14 +45,14 @@ These guidelines define standard behavior, code quality expectations, and domain
   - `AWS_SECRET_ACCESS_KEY=test`
   - `AWS_DEFAULT_REGION=us-east-1` (or the project-configured default region)
 - **Infrastructure as Code (IaC)**:
-  - Structure IaC (Terraform, CDK, CloudFormation, SAM) modularly under dedicated directories (e.g., `crm-infra/` or `iac/`).
+  - Structure IaC (Terraform, CDK, CloudFormation, SAM) modularly under dedicated directories (`crm-infra/` or `iac/`).
   - Ensure templates are compatible with LocalStack community or pro features as required.
 - **Idempotency & Clean Lifecycle**:
   - Scripts and test fixtures creating AWS resources (S3 buckets, SQS queues, DynamoDB tables, SNS topics, EventBridge buses, Lambda functions, etc.) must be idempotent or provide clean setup/teardown mechanics.
 
 ---
 
-## 4. Development & Testing Workflow
+## 4. Development, Testing, and Verification
 
 - **Local Verification**: Verify code and infrastructure changes against running LocalStack instances where feasible.
 - **Clean Git Hygiene**:
@@ -66,5 +66,5 @@ These guidelines define standard behavior, code quality expectations, and domain
 ## 5. Communication & Output Style
 
 - Be concise and direct in explanations.
-- Reference modified files and symbols with clickable markdown file links (`[filename](file:///absolute/path/to/file)`).
+- Reference modified files and symbols with clickable markdown file links (`[filename](file:///Users/cy/codes/localstack-reference-architecture/path/to/file)`).
 - When introducing new services or infrastructure components, provide clear run instructions or quick verification commands (e.g., `awslocal` or `curl`).

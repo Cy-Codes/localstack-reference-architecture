@@ -121,3 +121,5 @@ docker-compose.override.yml
 *~
 scratch/
 /local/
+
+.junie/plans/

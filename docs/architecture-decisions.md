@@ -12,7 +12,7 @@ The decisions are enforced day-to-day through the workspace coding standards:
 
 | ADR | crm-infra/ (Terraform / LocalStack) | CRMDatabasePG (PostgreSQL 16 / Flyway) | CRMDatabaseMS (SQL Server 2022 / DACPAC) | CrmApiCSharp (.NET 10 / C# 13) | CrmApiKotlinSpringBoot (Kotlin 2.x / Spring Boot) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1. Coding Standards | Infrastructure standards | [PG standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md) (PL/pgSQL, Python, Bash) | [MS standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md) (T-SQL, Python, Bash) | C# standards | Kotlin standards |
+| 1. Coding Standards | [Infrastructure standards](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/CODING_STANDARDS.md) (Terraform, LocalStack, Bash) | [PG standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabasePG/CODING_STANDARDS.md) (PL/pgSQL, Python, Bash) | [MS standards](file:///Users/cy/codes/localstack-reference-architecture/CRMDatabaseMS/CODING_STANDARDS.md) (T-SQL, Python, Bash) | [C# standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiCSharp/CODING_STANDARDS.md) (.NET 10, Dapper, SqlKata) | [Kotlin standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) (Kotlin 2.x, Spring Boot) |
 | 2–4. Platform | Terraform, LocalStack, images & migrators | PostgreSQL container, one-shot Flyway migrator | SQL Server container, one-shot SqlPackage deployer | Container image | Container image |
 | 5. Data Access | Schema deployed by one-shot migrators | Migration-based: immutable `V{n}__` scripts applied in order | State-based: one `.sql` per object, delta computed at deploy time | Dapper + SqlKata | `JdbcDataMapper` + immutable `SqlQuery` AST |
 | 6. Factories & Repositories | Identical connection strings via `crm-runtime-config` | Schema only; no app-side factory | Schema only; no app-side factory | `IDbConnectionFactory`, `ISqlKataCompilerFactory` | `IDbConnectionFactory`, `ISqlCompilerFactory` |
@@ -23,6 +23,7 @@ The decisions are enforced day-to-day through the workspace coding standards:
 | 11. Problem Details | — | — | — | `ExceptionHandlingMiddleware` | `ExceptionHandlingAdvice` (`@RestControllerAdvice`) |
 | 12. Pagination | — | — | — | `record QueryOptions` / `PagedResult<T>` | `data class QueryOptions` / `PagedResult<T>` |
 | 13. Polyglot Parity | Both runtimes in one catalog | Same schema served to both runtimes | Same schema served to both runtimes | Reference implementation | Feature-parity implementation |
+| 14. Command Endpoints & RBAC | [`dev-token.sh`](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/scripts/dev-token.sh) mints local role tokens | Constraints surface as `409` | Constraints surface as `409` | `*CommandsController`, `CrmRoles` policies, `ConflictException` | Spring Security URL rules, role converter, `ExceptionHandlingAdvice` |
 
 ---
 
@@ -40,6 +41,7 @@ The decisions are enforced day-to-day through the workspace coding standards:
 - [ADR 11: Standardized Error Handling via RFC 7807 / RFC 9457 Problem Details](#adr-11-standardized-error-handling-via-rfc-7807--rfc-9457-problem-details)
 - [ADR 12: Stateless Offset Pagination and Dynamic Filtering via Immutable Value Objects](#adr-12-stateless-offset-pagination-and-dynamic-filtering-via-immutable-value-objects)
 - [ADR 13: Polyglot Feature-Parity API Runtimes (C# & Kotlin) with JetBrains `kotlinx.serialization`](#adr-13-polyglot-feature-parity-api-runtimes-c--kotlin-with-jetbrains-kotlinxserialization)
+- [ADR 14: Command Endpoints (Create / Update / Delete) with Role-Based Authorization](#adr-14-command-endpoints-create--update--delete-with-role-based-authorization)
 
 ---
 
@@ -509,7 +511,7 @@ Adopt an **Encapsulated Application Database model with API-First domain governa
 - **Strict Encapsulation (No Direct DB Write Access)**: Direct write access to relational storage from reporting tools, third-party consumers, or ad-hoc scripts is explicitly denied. All mutations must route through API domain services.
 - **Structural Invariants at the Storage Tier**: The database layer is not passive; it rigorously enforces declarative relational invariants (primary keys, foreign keys, unique constraints, NOT NULL constraints, check constraints, and ACID transactions), guaranteeing that no invalid or orphaned data can ever be persisted under any operational circumstance.
 - **Network-Level Encapsulation in Deployed Environments**: In `crm-infra/`, database security groups and firewall rules admit only the API tasks plus explicitly configured admin/migrator ranges (`database_admin_cidrs` on AWS, `database_firewall_rules` on Azure). These ranges default to open for emulator convenience and must be restricted to private subnets/VNets and known IPs before any real-cloud deployment (see ADR 4).
-- **Concurrency & Write Guardrails**: When write paths are introduced, entities must enforce unique constraints on business keys (preventing check-then-insert races), utilize optimistic concurrency tokens (`rowversion` on SQL Server, `xmin` on PostgreSQL) with HTTP `ETag` / `If-Match` validation, and require client `Idempotency-Key` headers on POST endpoints.
+- **Concurrency & Write Guardrails**: When write paths are introduced, entities must enforce unique constraints on business keys (preventing check-then-insert races), utilize optimistic concurrency tokens (`rowversion` on SQL Server, `xmin` on PostgreSQL) with HTTP `ETag` / `If-Match` validation, and require client `Idempotency-Key` headers on POST endpoints. The first write paths shipped in [ADR 14](#adr-14-command-endpoints-create--update--delete-with-role-based-authorization) rely on the unique/foreign-key constraints (surfaced as `409`) but **defer** `ETag` / `If-Match` and `Idempotency-Key`; that gap is a tracked exception, not the target state.
 
 ---
 
@@ -624,7 +626,7 @@ Structure the solution into 4 strictly decoupled layers with inward-facing depen
 - **Strict Layer Boundary Enforcement**: Developers must resist leaking infrastructure concerns (e.g. `SqlConnection`, raw SQL strings) or transport concerns (e.g. `HttpContext`, HTTP status codes) into the `Domain` or `Application` layers. In C# this is enforced via compile-time project reference boundaries.
 - **Package-Level Boundaries in Kotlin**: Because the Kotlin layers share one Gradle module, boundaries are enforced by code review and the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md) rather than the compiler. The `domain` package may depend only on the Kotlin standard library and `kotlinx.serialization` annotations; automated architecture test suites (e.g. ArchUnit or Konsist) or multi-module Gradle subprojects are required to prevent illegal layer imports.
 - **Separated Interface Governance**: Every repository and query service is governed by an explicit interface (`ISalesforceQueryService`, `ISalesforceRepository`), ensuring that implementations remain interchangeable and fully mockable during testing.
-- **Authentication & Authorization Perimeter**: Real-cloud edge deployments must introduce non-bypassable authentication and authorization middleware (e.g. ASP.NET Core JWT/OAuth2 authentication and Spring Security) before routing public ingress through load balancers or API gateways.
+- **Authentication & Authorization Perimeter**: Real-cloud edge deployments must introduce non-bypassable authentication and authorization middleware (e.g. ASP.NET Core JWT/OAuth2 authentication and Spring Security) before routing public ingress through load balancers or API gateways. Role rules for mutations are defined in [ADR 14](#adr-14-command-endpoints-create--update--delete-with-role-based-authorization).
 
 ---
 
@@ -826,3 +828,62 @@ Maintain **`CrmApiKotlinSpringBoot`** (Kotlin 2.x, Spring Boot, JDK 25 toolchain
 - **Serializer Configuration Is Frozen**: Disabling `encodeDefaults`, switching to Jackson, or adding JavaBean-style DTOs is prohibited by the [CrmApiKotlinSpringBoot Coding Standards](file:///Users/cy/codes/localstack-reference-architecture/CrmApiKotlinSpringBoot/CODING_STANDARDS.md).
 - **Offline Build Dependency Integrity**: JDBC driver dependencies in `build.gradle.kts` must be declared unconditionally so that `--offline` Gradle builds retain required database drivers at runtime.
 - **Configuration Hygiene & Dead Config Removal**: Unused configuration sections (e.g. `crm.databases.*` in `application.yml`) must be removed or reconciled to prevent configuration drift with `ConnectionStrings.*`.
+
+---
+
+## ADR 14: Command Endpoints (Create / Update / Delete) with Role-Based Authorization
+
+### Status
+Accepted (first pass: core entities; remaining tables and hardening items are tracked in the guardrails below)
+
+### Context
+Both APIs were read-only. Introducing mutations requires (1) side-effecting code that is clearly separated from the pure query path (ADR 1), (2) one authorization model that behaves identically in C# and Kotlin (ADR 13), and (3) a way to protect writes without making public reads harder to use. The previous perimeter was a single on/off switch (`Authentication:Enabled` / `crm.security.auth-enabled`) that either protected everything or nothing, with no notion of roles.
+
+### Decision
+- **Commands are separate from queries.** Each CRM gets dedicated command services (`I{Crm}CommandService`) and controllers (`{Crm}CommandsController`) in C#, and the equivalent in Kotlin. Repository mutation methods are named `Execute*` / `execute*`; reads stay `Get*` / `get*`. Writes go through generic `ExecuteInsert/Update/Delete` primitives that accept only whitelisted identifiers and parameterized values (SqlKata in C#; in Kotlin the immutable `SqlCommand.Insert/Update/Delete` AST compiled by the same dialect compilers — a separate type from `SqlQuery`, a documented deviation from the ADR 5 "new sealed variants" guardrail; ADR 5).
+- **First-pass entities**: Salesforce `accounts`, `contacts`, `opportunities`; HubSpot `companies`, `contacts`, `deals`; Dynamics 365 `accounts`, `contacts`, `opportunities`, on both `ms` and `pg`.
+- **Verbs and semantics**: `POST` → `201` + `Location` + persisted entity; `PUT` → full replace of writable fields (`200`, or `404`); `DELETE` → hard delete (`204`, or `404`). Foreign-key / unique-key violations map to `409 Conflict` Problem Details (ADR 11).
+- **Roles** (JWT `roles` claim): *anonymous* = read-only; `user` = create + update; `admin` = create + update + delete. Every `GET`, `/health`, `/graphql`, and Swagger/actuator stay public; mutations are **always** protected and no configuration switch can open them. The legacy global toggle was removed.
+- **Server-owned columns**: identifiers (`ICrmIdGenerator` / id generator), audit timestamps (`TimeProvider` / `Clock`), generated columns, and derived values (`fullname`) are never accepted from clients. JWT subjects do not map to CRM users, so the record's `ownerId` doubles as creator/modifier on audit columns until identity mapping exists.
+- **Tokens for local use**: [`crm-infra/scripts/dev-token.sh`](file:///Users/cy/codes/localstack-reference-architecture/crm-infra/scripts/dev-token.sh) mints HS256 tokens with the shared development secret. A real identity provider is a tracked follow-up.
+
+### Rationales & Authoritative Sources
+
+1. **Command-Query Separation**:
+   - Mutating operations are explicit, named commands; queries remain side-effect free.
+   - *References*:
+     - Martin Fowler: [CommandQuerySeparation](https://martinfowler.com/bliki/CommandQuerySeparation.html).
+     - Bertrand Meyer: *Object-Oriented Software Construction* (Prentice Hall).
+
+2. **Function-Level Authorization Enforced Centrally**:
+   - Declarative role policies on the command endpoints (ASP.NET Core authorization policies; Spring Security request matchers) make "who may mutate" reviewable in one place and prevent forgotten checks.
+   - *References*:
+     - OWASP Foundation: [API Security Top 10](https://owasp.org/www-project-api-security/) — API5: Broken Function Level Authorization & API2: Broken Authentication.
+     - Microsoft Learn: [Role-based authorization in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/security/authorization/roles) & [Policy-based authorization](https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies).
+     - Spring Security Reference: [Authorize HTTP Requests](https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html) & [OAuth2 Resource Server JWT](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html).
+     - IETF: [RFC 7519 JSON Web Token](https://datatracker.ietf.org/doc/html/rfc7519) & [RFC 6750 Bearer Token Usage](https://datatracker.ietf.org/doc/html/rfc6750).
+
+3. **Standard HTTP Method Semantics**:
+   - `PUT` replaces the target representation idempotently, `DELETE` is idempotent, `POST` creates and returns `201` with `Location`.
+   - *References*:
+     - IETF RFC 9110: [HTTP Semantics — Methods](https://datatracker.ietf.org/doc/html/rfc9110#section-9).
+
+4. **Constraints as the Last Line of Defense**:
+   - Relational invariants (ADR 7) reject orphaning deletes and duplicate keys; the API translates the engine-specific error codes (SQL Server 547/2627/2601, PostgreSQL `23503`/`23505`) into one portable `409`.
+   - *References*:
+     - PostgreSQL: [Error Codes (Class 23 — Integrity Constraint Violation)](https://www.postgresql.org/docs/current/errcodes-appendix.html).
+     - Microsoft Learn: [Database Engine Errors](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors).
+     - IETF RFC 9110: [409 Conflict](https://datatracker.ietf.org/doc/html/rfc9110#name-409-conflict).
+
+### Outcomes
+
+#### Strategic Architectural Advantages
+- **Safe Public Reads, Locked Writes**: Consumers keep zero-friction `GET` access while every state change requires a verified identity and role.
+- **One Contract, Two Runtimes**: Identical routes, status codes, and role matrix in C# and Kotlin (ADR 13). Known parity gaps (Bruno layout, JWT issuer/audience validation, role-claim case sensitivity, input length validation) are tracked in `local/ISSUES.md`.
+- **Injection-Safe Writes**: Column names are whitelisted identifiers and all values are bound parameters, so request bodies can never alter SQL structure.
+
+#### Architectural Guardrails & Governance
+- **Mutations Are Never Anonymous**: Any new `POST` / `PUT` / `DELETE` route must carry the write or delete policy; tests assert `401` (no token), `403` (wrong role), and success per role.
+- **Dev Signing Key Is Not a Secret**: The shared HS256 key in `appsettings.json` / `application.yml` is for emulation only and must be replaced (ideally by an RS256 identity provider) before any real-cloud deployment.
+- **Tracked Exceptions** (see `local/TODO.md`): optimistic concurrency (`ETag` / `If-Match`) and `Idempotency-Key` required by ADR 7 are not yet implemented; mutations for the remaining ~28 tables; mapping JWT subjects to CRM users for audit columns; GraphQL mutations; real IdP.
+- **Parity Changes Ship Together**: Any new command endpoint lands in both runtimes and both Bruno collections in the same change set (ADR 13).
